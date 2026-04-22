@@ -1,0 +1,17 @@
+{
+  "name": "cryptovault-mern",
+  "version": "1.0.0",
+  "description": "CryptoVault MERN project",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"python server/app.py\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix client",
+    "test": "npm run build --prefix client"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
