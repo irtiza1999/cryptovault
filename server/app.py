@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
+import google.generativeai as genai
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -27,6 +28,10 @@ PORT = int(os.getenv("PORT", "5000"))
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
 DB_PATH = os.getenv("SQLITE_DB_PATH", str(BASE_DIR / "cryptovault.db"))
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
 
 ANALYSIS_COMPARISON = [
     {"name": "Substitution", "category": "Classical", "keySize": "26 letters", "blockSize": "N/A", "securityLevel": "Low"},
@@ -41,7 +46,7 @@ ANALYSIS_SECURITY = [
     {
         "algorithm": "Substitution",
         "strengths": ["Simple to understand"],
-        "weaknesses": ["Broken by frequency analysis", "Small key space for practical attacks"],
+        "weaknesses": ["Small key space for practical attacks"],
     },
     {
         "algorithm": "DES",
@@ -371,6 +376,32 @@ def run_crypto(operation):
         return jsonify(result)
     except Exception as exc:
         return jsonify({"message": str(exc)}), 400
+
+
+@app.post("/api/ai/explain")
+def explain_step():
+    if not GEMINI_API_KEY:
+        return jsonify({"message": "Gemini API Key is not configured in the server environment. Please set GEMINI_API_KEY in server/.env."}), 500
+    
+    body = request.get_json(silent=True) or {}
+    algo = body.get("algo", "Unknown")
+    step_data = body.get("stepData", {})
+    text = body.get("text", "")
+    
+    prompt = f"""You are an expert cryptography tutor. Explain the following specific step of the {algo} algorithm in a simple, beginner-friendly way, like "Explain Like I'm 5".
+    
+    Context:
+    - User Input Text: {text}
+    - Step Data: {json.dumps(step_data)}
+    
+    Keep your explanation to 2-3 short, engaging paragraphs. Focus exactly on what the 'Step Data' is showing and how it mathematically or logically transforms the data."""
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        return jsonify({"explanation": response.text})
+    except Exception as e:
+        return jsonify({"message": f"LLM Error: {str(e)}"}), 500
 
 
 def time_operation(fn):

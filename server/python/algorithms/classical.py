@@ -1,4 +1,4 @@
-from algorithms.common import ALPHABET, ENGLISH_FREQ, chunk_text, flatten, inverse_permutation, parse_permutation
+from algorithms.common import ALPHABET, chunk_text, flatten, inverse_permutation, parse_permutation
 
 # Normalize and validate the substitution key.
 def normalize_sub_key(key):
@@ -103,44 +103,3 @@ def double_trans_decrypt(text, key_a, key_b):
     # Return the recovered plaintext and the trace.
     return {"plaintext": plaintext, "intermediate": {"undoSecond": undo_second}}
 
-# Analyze a substitution cipher using frequency analysis.
-def substitution_attack(text):
-    # Lowercase the text first.
-    text = (text or "").lower()
-    # Keep only alphabetic characters.
-    cleaned = "".join(char for char in text if char in ALPHABET)
-    # Count each possible letter.
-    counts = {char: 0 for char in ALPHABET}
-    # Update the counts for every cleaned character.
-    for char in cleaned:
-        # Increase the frequency for the current letter.
-        counts[char] += 1
-    # Sort letters from most common to least common.
-    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
-    # Build a guessed mapping against typical English frequency.
-    guessed = {cipher: ENGLISH_FREQ[index] if index < len(ENGLISH_FREQ) else "?" for index, (cipher, _) in enumerate(ranked)}
-    # Prepare a few sample keys for brute-force style scoring.
-    sample_keys = ["zyxwvutsrqponmlkjihgfedcba", "qwertyuiopasdfghjklzxcvbnm", "phqgiumeaylnofdxkrcvstzwbj"]
-    # Collect candidate decryptions here.
-    attempts = []
-    # Try each sample key against the ciphertext.
-    for key in sample_keys:
-        # Build the reverse mapping for the sample key.
-        reverse = {key[index]: ALPHABET[index] for index in range(26)}
-        # Decode the text with the current key guess.
-        candidate = "".join(reverse.get(char, char) for char in text)
-        # Score the candidate by common English fragments.
-        score = sum(1 for token in [" the ", " and ", " to ", " of ", " is ", " in "] if token in f" {candidate} ")
-        # Save the attempt for the result view.
-        attempts.append({"key": key, "candidate": candidate, "score": score})
-    # Rank the candidate attempts from best to worst.
-    attempts.sort(key=lambda item: item["score"], reverse=True)
-    # Return the frequency table and brute-force attempts.
-    return {
-        "frequency": {
-            "counts": counts,
-            "ranked": [{"ch": char, "count": count} for char, count in ranked],
-            "guessedMap": guessed,
-        },
-        "bruteForce": {"attempts": attempts},
-    }

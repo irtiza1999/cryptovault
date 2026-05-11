@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { runAlgorithm } from "../services/api";
+import { askAITutor } from "../services/api";
+import CryptoCube3D from "../components/CryptoCube3D";
+import CipherRings3D from "../components/CipherRings3D";
+import TranspositionGrid3D from "../components/TranspositionGrid3D";
+import FeistelTower3D from "../components/FeistelTower3D";
+import RSAClock3D from "../components/RSAClock3D";
 
 const DEFAULT_SUB_KEY = "phqgiumeaylnofdxkrcvstzwbj";
 const SPEED_MS = { "0.5": 1600, "1": 800, "2": 350 };
@@ -66,6 +72,12 @@ function InteractivePlayground() {
   const [error,   setError]   = useState("");
   const [stepIndex, setStepIndex] = useState(0);
   const [playing,   setPlaying]   = useState(false);
+  const [aiExplanation, setAiExplanation] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+
+  useEffect(() => {
+    setAiExplanation("");
+  }, [stepIndex, algo]);
 
   const steps = useMemo(() => {
     if (!result) return [];
@@ -132,125 +144,27 @@ function InteractivePlayground() {
     }
   }
 
-  /* ── Step display components ── */
-
-  function SubstitutionDisplay() {
-    const subSteps = result?.steps || [];
-    return (
-      <>
-        <div className="pg-text-display">
-          {subSteps.map((s, i) => (
-            <span
-              key={i}
-              className={`pg-char ${i < stepIndex ? "pg-char-done" : ""} ${i === stepIndex ? "pg-char-active" : ""}`}
-            >
-              {s.in}
-              {i <= stepIndex && s.in !== s.out && (
-                <span className="pg-char-mapped">{s.out}</span>
-              )}
-            </span>
-          ))}
-        </div>
-        {currentStep && currentStep.in !== undefined && (
-          <div className="step-focus">
-            <div className="step-token in">{currentStep.in || "·"}</div>
-            <div className="step-arrow">→</div>
-            <div className="step-token out">{currentStep.out || "·"}</div>
-            <p>Position {currentStep.index}: &quot;{currentStep.in}&quot; substituted with &quot;{currentStep.out}&quot;</p>
-          </div>
-        )}
-      </>
-    );
+  async function handleAskAI() {
+    if (!currentStep) return;
+    setAiLoading(true);
+    setAiExplanation("");
+    try {
+      const payload = {
+        algo: algo,
+        stepData: currentStep,
+        text: text
+      };
+      const res = await askAITutor(payload);
+      setAiExplanation(res.data.explanation);
+    } catch (err) {
+      setAiExplanation(err.response?.data?.message || "Failed to contact AI Tutor.");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
-  function AESDisplay() {
-    const rounds = result?.rounds || [];
-    const cur    = rounds[stepIndex];
-    return (
-      <>
-        <div className="pg-round-progress">
-          {rounds.map((r, i) => (
-            <div
-              key={i}
-              className={`pg-round-dot ${i < stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`}
-            >
-              {r.round}
-            </div>
-          ))}
-        </div>
-        {cur && (
-          <div className="pg-round-detail">
-            <div className="pg-round-detail-head">Round {cur.round} — 4×4 State Matrix</div>
-            <HexGrid hexStr={cur.stateHex} />
-            <div className="aes-round-hex" style={{ marginTop: "0.5rem" }}>{cur.stateHex}</div>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  function DESDisplay() {
-    const rounds = result?.rounds || [];
-    const cur    = rounds[stepIndex];
-    return (
-      <>
-        <div className="pg-round-progress">
-          {rounds.map((r, i) => (
-            <div
-              key={i}
-              className={`pg-round-dot ${i < stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`}
-            >
-              {r.round}
-            </div>
-          ))}
-        </div>
-        {cur && (
-          <div className="pg-round-detail">
-            <div className="pg-round-detail-head">Round {cur.round} — Feistel Halves</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.5rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                <span className="half-tag">L</span>
-                <BitBlocks bits={cur.left} limit={32} />
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                <span className="half-tag">R</span>
-                <BitBlocks bits={cur.right} limit={32} />
-              </div>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  function GenericDisplay() {
-    if (!currentStep) return null;
-    return (
-      <div className="pg-step-card">
-        <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
-          <span className="pg-step-num">{stepIndex + 1}</span>
-          <span className="pg-step-title">{currentStep.step || "Step"}</span>
-        </div>
-        {currentStep.formula && (
-          <div className="pg-step-formula">{currentStep.formula}</div>
-        )}
-        <div className="pg-step-value">
-          {typeof currentStep.value === "object"
-            ? JSON.stringify(currentStep.value)
-            : String(currentStep.value ?? "")}
-        </div>
-      </div>
-    );
-  }
-
-  function StepViewer() {
-    if (!result || !totalSteps) return null;
-    if (algo.includes("substitution") && result.steps) return <SubstitutionDisplay />;
-    if (algo.includes("aes") && result.rounds)         return <AESDisplay />;
-    if (algo.includes("des") && result.rounds)         return <DESDisplay />;
-    return <GenericDisplay />;
-  }
-
+  /* ── Step display components (MOVED OUTSIDE) ── */
+  
   const algoFamily = algo.split("/")[1] || "";
 
   return (
@@ -427,7 +341,41 @@ function InteractivePlayground() {
           </div>
 
           <div className="step-detail-viewer">
-            <StepViewer />
+            <StepViewer result={result} stepIndex={stepIndex} algo={algo} steps={steps} />
+          </div>
+
+          <div className="ai-tutor-section" style={{ marginTop: '1rem', padding: '1rem', background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--line)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiExplanation || aiLoading ? '1rem' : 0 }}>
+              <strong style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>🤖</span> AI Crypto Tutor
+              </strong>
+              <button 
+                onClick={handleAskAI} 
+                disabled={aiLoading}
+                className="pill badge-encrypt"
+                style={{ cursor: 'pointer', border: 'none' }}
+              >
+                {aiLoading ? "Thinking..." : "Explain This Step"}
+              </button>
+            </div>
+            
+            {aiLoading && <div style={{ fontStyle: 'italic', color: 'var(--muted)', fontSize: '0.9rem' }}>Analyzing cryptographic context...</div>}
+            
+            {aiExplanation && !aiLoading && (
+              <div className="ai-explanation-content" style={{ fontSize: '0.95rem', lineHeight: '1.6', padding: '1rem', background: 'var(--bg)', borderRadius: '4px', borderLeft: '4px solid #3b82f6' }}>
+                {aiExplanation.split('\n').map((para, i) => (
+                  <p key={i} style={{ margin: '0 0 0.5rem 0' }}>{para}</p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="playground-3d-view" style={{ marginTop: '1.5rem' }}>
+            {algo.includes("substitution") && <CipherRings3D stepIndex={stepIndex} result={result} />}
+            {algo.includes("transposition") && <TranspositionGrid3D stepIndex={stepIndex} result={result} />}
+            {algo.includes("des") && <FeistelTower3D stepIndex={stepIndex} result={result} />}
+            {algo.includes("aes") && <CryptoCube3D stepIndex={stepIndex} result={result} />}
+            {algo.includes("rsa") && <RSAClock3D stepIndex={stepIndex} result={result} />}
           </div>
         </div>
       )}
@@ -440,3 +388,64 @@ function InteractivePlayground() {
 }
 
 export default InteractivePlayground;
+
+/* ── Extracted Sub-Components ── */
+
+function SubstitutionDisplay({ result, stepIndex }) {
+  if (!result?.steps?.[stepIndex]) return null;
+  const item = result.steps[stepIndex];
+  return (
+    <div className="step-trace-card">
+      <div className="trace-item active">
+        <span className="trace-idx">Index {item.index}:</span>
+        <span className="trace-val">{item.in} → {item.out}</span>
+      </div>
+    </div>
+  );
+}
+
+function AESDisplay({ result, stepIndex }) {
+  if (!result?.rounds?.[stepIndex]) return null;
+  const round = result.rounds[stepIndex];
+  return (
+    <div className="round-card">
+      <h4>Round {round.round} Output</h4>
+      <div className="hex-display">{round.stateHex}</div>
+    </div>
+  );
+}
+
+function DESDisplay({ result, stepIndex }) {
+  if (!result?.rounds?.[stepIndex]) return null;
+  const round = result.rounds[stepIndex];
+  return (
+    <div className="round-card">
+      <h4>Round {round.round}</h4>
+      <div className="bit-split">
+        <div>L: <code className="bit-code">{round.left}</code></div>
+        <div>R: <code className="bit-code">{round.right}</code></div>
+      </div>
+    </div>
+  );
+}
+
+function GenericDisplay({ steps, stepIndex }) {
+  if (!steps[stepIndex]) return null;
+  const item = steps[stepIndex];
+  return (
+    <div className="generic-step">
+      <h4>{item.step}</h4>
+      <div className="step-val">{item.value || item.formula}</div>
+    </div>
+  );
+}
+
+function StepViewer({ result, stepIndex, algo, steps }) {
+  const totalSteps = result ? (result.steps?.length || result.rounds?.length || steps?.length || 0) : 0;
+  if (!result || !totalSteps) return null;
+  if (algo.includes("substitution") && result.steps) return <SubstitutionDisplay result={result} stepIndex={stepIndex} />;
+  if (algo.includes("aes") && result.rounds)         return <AESDisplay result={result} stepIndex={stepIndex} />;
+  if (algo.includes("des") && result.rounds)         return <DESDisplay result={result} stepIndex={stepIndex} />;
+  return <GenericDisplay steps={steps} stepIndex={stepIndex} />;
+}
+

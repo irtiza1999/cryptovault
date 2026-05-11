@@ -1,4 +1,3 @@
-from algorithms.attacks import pollards_rho, substitution_attack
 from algorithms.classical import double_trans_decrypt, double_trans_encrypt, substitution_transform
 from algorithms.public_key import ecdh, rsa_decrypt, rsa_encrypt, rsa_keygen
 from algorithms.symmetric import aes_decrypt, aes_encrypt, des_decrypt, des_encrypt
@@ -13,9 +12,6 @@ def dispatch(operation, payload):
     # Route classical substitution decryption.
     if operation == "classical/substitution/decrypt":
         return substitution_transform(payload.get("text", ""), payload.get("key", ""), decrypt=True)
-    # Route the substitution attack helper.
-    if operation == "classical/substitution/attack":
-        return substitution_attack(payload.get("text", ""))
     # Route double transposition encryption.
     if operation == "classical/transposition/encrypt":
         return double_trans_encrypt(payload.get("text", ""), payload.get("keyA", "2,0,1"), payload.get("keyB", "1,2,0"))
@@ -43,9 +39,6 @@ def dispatch(operation, payload):
     # Route RSA decryption.
     if operation == "public/rsa/decrypt":
         return rsa_decrypt(payload.get("ciphertext", "0"), payload.get("privateKey", {}))
-    # Route RSA factorization attack.
-    if operation == "public/rsa/attack":
-        return pollards_rho(payload.get("n", "8051"), payload.get("maxIterations", 50000))
     # Route ECC ECDH.
     if operation == "public/ecc/ecdh":
         return ecdh(payload)

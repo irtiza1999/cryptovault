@@ -1,6 +1,5 @@
 import { NavLink } from "react-router-dom";
 import ThemeSwitch from "./ThemeSwitch";
-import { useAuth } from "../context/AuthContext";
 
 const links = [
   { to: "/", label: "Dashboard" },
@@ -8,12 +7,10 @@ const links = [
   { to: "/comparison", label: "Comparison" },
   { to: "/interactive", label: "Cipher Playground" },
   { to: "/challenge", label: "Cipher Challenge" },
-  { to: "/vault", label: "My Vault" }
 ];
 
-function Sidebar() {
-  const { user, logout } = useAuth();
 
+function Sidebar() {
   return (
     <aside className="sidebar">
       <h1>CryptoVault</h1>
@@ -30,20 +27,6 @@ function Sidebar() {
           </NavLink>
         ))}
       </nav>
-
-      <div className="auth-block">
-        {user ? (
-          <>
-            <p className="user-pill">Signed in as {user.name}</p>
-            <button className="ghost-button" onClick={logout}>Logout</button>
-          </>
-        ) : (
-          <>
-            <NavLink to="/login" className="nav-link">Login</NavLink>
-            <NavLink to="/register" className="nav-link">Register</NavLink>
-          </>
-        )}
-      </div>
     </aside>
   );
 }

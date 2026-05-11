@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { runAlgorithm, saveRun } from "../services/api";
+import { runAlgorithm } from "../services/api";
 import ResultPanel from "../components/ResultPanel";
-import { useAuth } from "../context/AuthContext";
 
 const ALGOS = [
   { value: "classical/substitution/encrypt", label: "Substitution — Encrypt",          type: "classical", dir: "encrypt", fields: ["text", "key"] },
   { value: "classical/substitution/decrypt", label: "Substitution — Decrypt",          type: "classical", dir: "decrypt", fields: ["text", "key"] },
-  { value: "classical/substitution/attack",  label: "Substitution — Frequency Attack", type: "classical", dir: "attack",  fields: ["text"] },
   { value: "classical/transposition/encrypt",label: "Double Transposition — Encrypt",  type: "classical", dir: "encrypt", fields: ["text", "keyA", "keyB"] },
   { value: "classical/transposition/decrypt",label: "Double Transposition — Decrypt",  type: "classical", dir: "decrypt", fields: ["text", "keyA", "keyB"] },
   { value: "symmetric/des/encrypt",          label: "DES — Encrypt",                   type: "symmetric", dir: "encrypt", fields: ["text", "key"] },
@@ -16,7 +14,6 @@ const ALGOS = [
   { value: "public/rsa/keygen",              label: "RSA — Key Generation",            type: "publickey", dir: "keygen",  fields: ["bitSize"] },
   { value: "public/rsa/encrypt",             label: "RSA — Encrypt",                   type: "publickey", dir: "encrypt", fields: ["text", "publicKey"] },
   { value: "public/rsa/decrypt",             label: "RSA — Decrypt",                   type: "publickey", dir: "decrypt", fields: ["cipherInt", "privateKey"] },
-  { value: "public/rsa/attack",              label: "RSA — Pollard's Rho Attack",      type: "publickey", dir: "attack",  fields: ["attackN"] },
   { value: "public/ecc/ecdh",               label: "ECC — ECDH Key Exchange",          type: "publickey", dir: "keygen",  fields: ["eccParams"] },
 ];
 
@@ -26,7 +23,6 @@ const DIR_META = {
   encrypt: { label: "ENCRYPT",  cls: "badge-encrypt" },
   decrypt: { label: "DECRYPT",  cls: "badge-decrypt" },
   keygen:  { label: "KEY GEN",  cls: "badge-keygen"  },
-  attack:  { label: "ATTACK",   cls: "badge-attack"  },
 };
 
 const HINTS = {
@@ -39,11 +35,10 @@ const HINTS = {
   "public/rsa/keygen":              "larger bit size = stronger keys (try 40–256 for demo speed)",
   "public/rsa/encrypt":             "paste the e,n values from an RSA KeyGen result",
   "public/rsa/decrypt":             "paste the d,n values from an RSA KeyGen result",
-  "public/rsa/attack":              "enter a small semiprime n to factor, e.g. 8051",
 };
 
 export default function AlgorithmLab() {
-  const { user } = useAuth();
+  const user = null;
 
   const [route,      setRoute]      = useState(ALGOS[0].value);
   const [text,       setText]       = useState("hello world");
@@ -59,8 +54,6 @@ export default function AlgorithmLab() {
   const [bitSize,    setBitSize]    = useState("40");
   const [publicKey,  setPublicKey]  = useState("65537,9173503");
   const [privateKey, setPrivateKey] = useState("4922825,9173503");
-  const [attackN,    setAttackN]    = useState("8051");
-
   // ECC curve parameters — fully editable
   const [eccP,       setEccP]       = useState("97");
   const [eccA,       setEccA]       = useState("2");
@@ -101,8 +94,6 @@ export default function AlgorithmLab() {
       p.ciphertext = cipherInt;
       p.text       = cipherInt;
     }
-    if (route.includes("rsa/attack"))  p.n = attackN;
-
     if (route.includes("ecc/ecdh")) {
       p.p        = eccP;
       p.a        = eccA;
@@ -112,7 +103,7 @@ export default function AlgorithmLab() {
     }
     return p;
   }, [route, text, desHex, aesHex, cipherInt, key, keyA, keyB,
-      blockMode, desIv, aesIv, bitSize, publicKey, privateKey, attackN,
+      blockMode, desIv, aesIv, bitSize, publicKey, privateKey,
       eccP, eccA, eccGx, eccGy, eccPrivA, eccPrivB]);
 
   useEffect(() => {
@@ -135,15 +126,7 @@ export default function AlgorithmLab() {
     }
   }
 
-  async function saveCurrentRun() {
-    if (!user || !output) { setNotice("Log in and run an algorithm first."); return; }
-    try {
-      await saveRun({ route, input: payload, output, notes: "saved from lab", favorite: false, tags: ["lab"] });
-      setNotice("Saved to My Vault.");
-    } catch (err) {
-      setNotice(err.response?.data?.message || err.message);
-    }
-  }
+  // Save to vault removed (authentication removed)
 
   function applyGeneratedKeys() {
     if (!output?.publicKey || !output?.privateKey) return;
@@ -250,13 +233,6 @@ export default function AlgorithmLab() {
           </label>
         )}
 
-        {currentAlgo?.fields.includes("attackN") && (
-          <label className="field-full">
-            <span className="field-label">Modulus n to Factor</span>
-            <input value={attackN} onChange={(e) => setAttackN(e.target.value)} placeholder="e.g. 8051" className="mono-input" />
-          </label>
-        )}
-
         {currentAlgo?.fields.includes("key") && (
           <label>
             <span className="field-label">
@@ -340,7 +316,7 @@ export default function AlgorithmLab() {
         <button onClick={run} disabled={running} className="run-btn">
           {running ? "⏳ Computing…" : "▶  Run Algorithm"}
         </button>
-        <button onClick={saveCurrentRun} className="ghost-button">💾 Save to Vault</button>
+        {/* Save to Vault removed */}
         {route.includes("rsa/keygen") && output?.publicKey && (
           <button onClick={applyGeneratedKeys} className="ghost-button use-keys-btn">
             ⚡ Use These Keys

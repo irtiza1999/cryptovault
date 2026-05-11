@@ -95,7 +95,6 @@ Server example fields in [server/.env.example](server/.env.example):
 - Crypto (python-backed):
   - `POST /api/crypto/classical/substitution/encrypt`
   - `POST /api/crypto/classical/substitution/decrypt`
-  - `POST /api/crypto/classical/substitution/attack`
   - `POST /api/crypto/classical/transposition/encrypt`
   - `POST /api/crypto/classical/transposition/decrypt`
   - `POST /api/crypto/symmetric/des/encrypt`
@@ -105,7 +104,6 @@ Server example fields in [server/.env.example](server/.env.example):
   - `POST /api/crypto/public/rsa/keygen`
   - `POST /api/crypto/public/rsa/encrypt`
   - `POST /api/crypto/public/rsa/decrypt`
-  - `POST /api/crypto/public/rsa/attack`
   - `POST /api/crypto/public/ecc/ecdh`
 - Analysis + Benchmarks:
   - `POST /api/benchmarks/run`

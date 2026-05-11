@@ -9,7 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import { fetchBenchmarkHistory, healthCheck, runAlgorithm, runBenchmarks } from "../services/api";
-import { useAuth } from "../context/AuthContext";
+import CryptoCube3D from "../components/CryptoCube3D";
 
 function Dashboard() {
   const [status, setStatus] = useState("Checking API...");
@@ -19,7 +19,7 @@ function Dashboard() {
   const [benchRows, setBenchRows] = useState([]);
   const [loadingBench, setLoadingBench] = useState(false);
   const [error, setError] = useState("");
-  const { user } = useAuth();
+  const user = null;
 
   const chartRows = useMemo(() => {
     const grouped = benchRows.reduce((acc, row) => {
@@ -77,13 +77,15 @@ function Dashboard() {
 
   return (
     <div>
-      <section className="hero card hero-card">
-        <h2>CryptoVault Studio</h2>
-        <p>
-          Python-powered cryptographic algorithms behind a React.js interface. Explore internals,
-          attacks, benchmarks, and save your runs in your private vault.
-        </p>
-        <p className="pill">{user ? `Welcome back, ${user.name}` : "Sign in to unlock My Vault"}</p>
+      <section className="hero card hero-card" style={{ display: 'flex', flexDirection: 'row', gap: '2rem', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ flex: 1 }}>
+          <h2>CryptoVault Studio</h2>
+          <p>
+            Python-powered cryptographic algorithms behind a React.js interface. Explore internals,
+            attacks, benchmarks, and save your runs in your private vault.
+          </p>
+          <p className="pill">Explore features and run algorithms.</p>
+        </div>
       </section>
 
       <section className="grid-three">

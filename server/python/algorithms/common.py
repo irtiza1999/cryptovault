@@ -3,9 +3,6 @@ import math
 # Define the lowercase alphabet used by the classical cipher code.
 ALPHABET = "abcdefghijklmnopqrstuvwxyz"
 
-# Define the most common English letters for the substitution attack heuristic.
-ENGLISH_FREQ = "etaoinshrdlcumwfgypbvkjxqz"
-
 # Convert any value to a safe integer with a default fallback.
 def as_int(value, default):
     # Return the default when the incoming value is missing.
