@@ -137,7 +137,6 @@ def init_db():
     db.close()
 
 
-# Ensure DB schema exists whenever the app module is loaded.
 init_db()
 
 
@@ -420,44 +419,37 @@ def run_benchmarks():
         plain = "a" * int(size)
         size_bytes = len(plain.encode("utf-8"))
 
-        # --- Substitution ---
         sub_res = None
         def run_sub():
             nonlocal sub_res
             sub_res = dispatch("classical/substitution/encrypt", {"text": plain, "key": "phqgiumeaylnofdxkrcvstzwbj"})
         sub_ms = time_operation(run_sub)
-        
-        # --- Double Transposition ---
+
         trans_res = None
         def run_trans():
             nonlocal trans_res
             trans_res = dispatch("classical/transposition/encrypt", {"text": plain, "keyA": "2,0,1", "keyB": "1,2,0"})
         trans_ms = time_operation(run_trans)
 
-        # --- DES (Toy) ---
         des_res = None
         def run_des():
             nonlocal des_res
             des_res = dispatch("symmetric/des/encrypt", {"text": plain[:8], "key": "secret!!"})
         des_ms = time_operation(run_des)
 
-        # --- AES (Toy) ---
         aes_res = None
         def run_aes():
             nonlocal aes_res
             aes_res = dispatch("symmetric/aes/encrypt", {"text": plain[:16], "key": "sixteen-char-key"})
         aes_ms = time_operation(run_aes)
 
-        # --- RSA (Small bits for speed) ---
         rsa_res = None
         def run_rsa():
             nonlocal rsa_res
-            # First generate a quick key
             key = dispatch("public/rsa/keygen", {"bitSize": 32})
             rsa_res = dispatch("public/rsa/encrypt", {"message": plain[:4], "publicKey": key["publicKey"]})
         rsa_ms = time_operation(run_rsa)
 
-        # --- ECC (ECDH) ---
         ecc_ms = time_operation(
             lambda: dispatch("public/ecc/ecdh", {"p": "97", "a": "2", "privateA": "5", "privateB": "7"})
         )

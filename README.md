@@ -113,4 +113,8 @@ Server example fields in [server/.env.example](server/.env.example):
 
 ## Note
 
-DES and AES in this codebase are educational implementations designed for visibility and learning. They are not intended as production cryptographic primitives.
+DES follows the full FIPS 46-3 specification: PC-1/PC-2 key schedule, eight standard S-boxes, IP/FP permutations, E expansion, and P permutation.
+
+AES follows FIPS 197 (AES-128): Rijndael S-box, standard ShiftRows, GF(2⁸) MixColumns with precomputed multiplication tables, and RotWord/SubWord/Rcon key expansion.
+
+Both produce results interoperable with other standards-compliant implementations. Neither uses constant-time operations or standard padding (PKCS#7), so they are not hardened for production use.

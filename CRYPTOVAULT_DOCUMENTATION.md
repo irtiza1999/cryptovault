@@ -17,8 +17,8 @@
 6. [Cryptographic Algorithms](#6-cryptographic-algorithms)
    - [Classical — Substitution Cipher](#61-classical--substitution-cipher)
    - [Classical — Double Transposition](#62-classical--double-transposition)
-   - [Symmetric — DES (Toy)](#63-symmetric--des-toy)
-   - [Symmetric — AES (Toy)](#64-symmetric--aes-toy)
+   - [Symmetric — DES (FIPS 46-3)](#63-symmetric--des-fips-46-3)
+   - [Symmetric — AES (FIPS 197)](#64-symmetric--aes-fips-197)
    - [Public-Key — RSA](#65-public-key--rsa)
    - [Public-Key — ECDH](#66-public-key--ecdh)
    - [Cryptanalysis — Frequency Analysis](#67-cryptanalysis--frequency-analysis)
@@ -130,23 +130,24 @@ Every algorithm, utility, and frontend component mapped to its exact file.
 | File | Algorithm / Function | Purpose |
 |------|---------------------|---------|
 | `server/app.py` | — | Flask app, all HTTP routes, JWT auth, SQLite queries, Gemini AI proxy |
-| `server/python/dispatcher.py` | — | Route-string → Python function mapping table |
+| `server/python/dispatcher.py` | `dispatch` | Shared route-string → algorithm function dispatcher |
+| `server/python/cli_runner.py` | `main` | Read JSON from stdin, dispatch the operation, and write JSON to stdout |
 | `server/python/algorithms/classical.py` | `normalize_sub_key` | Validates 26-letter substitution key |
 | `server/python/algorithms/classical.py` | `substitution_transform` | Monoalphabetic substitution encrypt / decrypt |
 | `server/python/algorithms/classical.py` | `double_trans_encrypt` | Double columnar transposition encryption |
 | `server/python/algorithms/classical.py` | `double_trans_decrypt` | Double columnar transposition decryption |
-| `server/python/algorithms/symmetric.py` | `derive_round_keys` | DES key schedule — generate 16 round keys |
-| `server/python/algorithms/symmetric.py` | `feistel_round` | Single DES Feistel round (L, R, K → L′, R′) |
-| `server/python/algorithms/symmetric.py` | `process_des_block` | Run all 16 Feistel rounds on one 64-bit block |
+| `server/python/algorithms/symmetric.py` | `_des_key_schedule` | DES key schedule — PC-1 → C/D split → 16 × PC-2 round keys (FIPS 46-3) |
+| `server/python/algorithms/symmetric.py` | `_des_round_function` | DES F-function: E expansion, XOR key, 8 S-boxes, P permutation |
+| `server/python/algorithms/symmetric.py` | `_des_process_block` | IP → 16 Feistel rounds → final swap → FP on one 64-bit block |
 | `server/python/algorithms/symmetric.py` | `des_encrypt` | DES encryption in ECB or CBC mode |
 | `server/python/algorithms/symmetric.py` | `des_decrypt` | DES decryption in ECB or CBC mode |
-| `server/python/algorithms/symmetric.py` | `sbox` / `inv_sbox` | AES byte substitution layer (S-box) |
-| `server/python/algorithms/symmetric.py` | `shift_rows` / `inv_shift_rows` | AES row-shift step |
-| `server/python/algorithms/symmetric.py` | `mix_columns` / `inv_mix_columns` | AES column-mix diffusion step |
-| `server/python/algorithms/symmetric.py` | `expand_key` | AES key expansion — generate 10 round keys |
-| `server/python/algorithms/symmetric.py` | `aes_encrypt_block` | AES 10-round SPN block encryption |
-| `server/python/algorithms/symmetric.py` | `aes_encrypt` | AES encryption in ECB or CBC mode |
-| `server/python/algorithms/symmetric.py` | `aes_decrypt` | AES decryption in ECB or CBC mode |
+| `server/python/algorithms/symmetric.py` | `_aes_sub_bytes` / `_aes_inv_sub_bytes` | Rijndael S-box substitution (full 256-entry lookup table) |
+| `server/python/algorithms/symmetric.py` | `_aes_shift_rows` / `_aes_inv_shift_rows` | AES row-shift step (column-major state) |
+| `server/python/algorithms/symmetric.py` | `_aes_mix_columns` / `_aes_inv_mix_columns` | AES MixColumns / InvMixColumns via GF(2⁸) multiplication tables |
+| `server/python/algorithms/symmetric.py` | `_aes_key_expansion` | FIPS 197 key expansion — RotWord, SubWord, Rcon → 11 round keys |
+| `server/python/algorithms/symmetric.py` | `_aes_encrypt_block` | AES 10-round SPN block encryption |
+| `server/python/algorithms/symmetric.py` | `aes_encrypt` | AES-128 encryption in ECB or CBC mode |
+| `server/python/algorithms/symmetric.py` | `aes_decrypt` | AES-128 decryption in ECB or CBC mode |
 | `server/python/algorithms/public_key.py` | `is_probable_prime` | Miller-Rabin primality test |
 | `server/python/algorithms/public_key.py` | `generate_prime` | Random probable prime of given bit length |
 | `server/python/algorithms/public_key.py` | `string_to_integer` | Pack text bytes into big integer (for RSA) |
@@ -361,15 +362,15 @@ CREATE TABLE benchmarks (
 
 ### 5.3 Algorithm Dispatcher
 
-`server/python/dispatcher.py` holds a flat dictionary mapping route strings to callables. When Flask receives `POST /api/crypto/classical/substitution/encrypt`, it joins the path segments into the key `"classical/substitution/encrypt"` and calls the corresponding function with the parsed JSON body as keyword arguments.
+`server/python/dispatcher.py` exposes the shared `dispatch(operation, payload)` entrypoint that maps route strings to algorithm functions. `server/python/cli_runner.py` reuses that same entrypoint for stdin/stdout execution, while Flask calls it for HTTP requests.
 
-This design keeps `app.py` clean of algorithm logic and makes adding new algorithms a one-line registration.
+This keeps `app.py` clean of algorithm logic and makes adding new algorithms a one-line registration.
 
 ---
 
 ## 6. Cryptographic Algorithms
 
-All implementations are **educational toy versions** — correct in structure, but not hardened for production use (no constant-time operations, no padding standards, small key sizes).
+DES and AES are implemented to the full FIPS standard (FIPS 46-3 and FIPS 197 respectively) with complete permutation tables, real S-boxes, and correct GF(2⁸) arithmetic. Classical ciphers and public-key algorithms are also implemented from scratch in Python for educational transparency. None of these implementations use constant-time operations or padding standards and are not suitable for production security use.
 
 ---
 
@@ -677,579 +678,357 @@ def double_trans_decrypt(text, key_a, key_b):
 
 ---
 
-### 6.3 Symmetric — DES (Toy)
+### 6.3 Symmetric — DES (FIPS 46-3)
 
 **File**: `server/python/algorithms/symmetric.py`  
-**Functions**: `des_encrypt`, `des_decrypt`, `feistel_round`, `derive_round_keys`, `process_des_block`
+**Functions**: `des_encrypt`, `des_decrypt`, `_des_key_schedule`, `_des_round_function`, `_des_process_block`
 
 #### What It Is
 
-DES (Data Encryption Standard) is a 64-bit block cipher with a 56-bit key, published in 1977. It uses a **Feistel network**: the block is split into two halves and processed through 16 rounds. This implementation is a structurally faithful but simplified toy — it captures the Feistel structure and key scheduling concept while using simplified S-boxes and permutations for clarity.
+DES (Data Encryption Standard, FIPS 46-3) is a 64-bit block cipher with a 56-bit effective key, standardised in 1977. It uses a **Feistel network**: the block is split into two 32-bit halves processed through 16 rounds. Each round applies the F-function (expansion, XOR, S-box substitution, permutation) and XORs the result into the opposite half.
 
-#### Block and Key Sizes
+This implementation follows the full FIPS 46-3 specification including all permutation tables, the eight standard 6→4 S-boxes, and the correct PC-1/PC-2 key schedule.
 
-| Parameter | Real DES | This Implementation |
-|-----------|----------|-------------------|
-| Block size | 64 bits (8 bytes) | 64 bits (8 bytes) |
-| Key size | 56 bits effective | First 8 bytes used |
-| Rounds | 16 | 16 |
-| S-boxes | 8 specific 6→4 bit boxes | Simplified arithmetic |
+#### Block and Key Parameters
 
-#### Key Schedule: `derive_round_keys(bits)`
+| Parameter | Value |
+|-----------|-------|
+| Block size | 64 bits (8 bytes) |
+| Key input | 8 bytes (64 bits); 8 parity bits stripped by PC-1 → 56 effective bits |
+| Rounds | 16 |
+| Round key size | 48 bits |
+| S-boxes | 8 (each maps 6 bits → 4 bits) |
 
-```
-INPUT: 64-bit key as bit string
-
-For each of 16 rounds:
-  1. Rotate left by 3 positions
-  2. Take first 32 bits as this round's key
-
-OUTPUT: List of 16 × 32-bit round keys
-```
-
-#### Feistel Round: `feistel_round(left, right, round_key)`
-
-The core operation of each DES round:
+#### Key Schedule: `_des_key_schedule(key_bits_str)`
 
 ```
-INPUT: left (32 bits), right (32 bits), round_key (32 bits)
+INPUT: 64-bit key as a binary string
 
-1. Expand right half:
-   expanded = right + right[:16]     # 32 → 48 bits conceptually
+1. PC-1 permutation: select 56 of 64 bits, split into C (28 bits) and D (28 bits)
+2. For each of 16 rounds:
+   a. Rotate C left by shift[round]  (schedule: 1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1)
+   b. Rotate D left by the same amount
+   c. PC-2 permutation: select 48 bits from C|D as the round key K_i
 
-2. XOR with round key:
-   mixed = expanded XOR round_key
-
-3. New right = mixed XOR left
-
-4. Swap halves: new_left = old right, new_right = computed above
-
-OUTPUT: (new_left, new_right)
+OUTPUT: List of 16 × 48-bit round keys
 ```
 
-The genius of the Feistel design is that decryption uses the exact same structure — just feed the round keys in reverse order.
+PC-1 discards the 8 parity bits (positions 8, 16, 24, …, 64). PC-2 selects 48 of the remaining 56 bits for each round key.
 
-#### Full Block Encryption: `process_des_block(block, round_keys)`
+#### F-Function: `_des_round_function(right_bits, round_key_bits)`
 
 ```
-INPUT: 8-byte block as bit string, 16 round keys
+INPUT: R (32 bits), K_i (48 bits)
 
-1. Split into 32-bit left and right halves
-2. For i = 0 to 15:
-     left, right = feistel_round(left, right, round_keys[i])
-3. Final swap (DES convention)
-4. Concatenate: ciphertext_bits = left + right
+1. E expansion: 32 → 48 bits by duplicating boundary bits (permutation table E)
+2. XOR with round key: 48 bits XOR 48 bits
+3. S-box substitution: split 48 bits into 8 groups of 6; each group enters one S-box
+   - Row index: bit 0 (MSB) and bit 5 (LSB) of the 6-bit group
+   - Column index: bits 1–4 of the 6-bit group
+   - Output: 4 bits from the 4×16 S-box table → 8 × 4 = 32 bits total
+4. P permutation: 32 → 32 bit rearrangement for diffusion
 
-OUTPUT: (ciphertext_bits, rounds_trace)
+OUTPUT: F(R, K_i) — 32 bits
 ```
 
-`rounds_trace` captures `left` and `right` after every round for visualization.
+#### Full Block Encryption: `_des_process_block(block_bits_str, round_keys)`
+
+```
+INPUT: 64-bit block as binary string, 16 × 48-bit round keys
+
+1. IP (Initial Permutation): rearrange 64 bits
+2. Split into L_0 (bits 0–31) and R_0 (bits 32–63)
+3. For i = 1 to 16:
+     L_i = R_{i-1}
+     R_i = L_{i-1} XOR F(R_{i-1}, K_i)
+4. Final swap: concatenate R_16 | L_16
+5. FP (Final Permutation / IP⁻¹): rearrange 64 bits
+
+OUTPUT: (ciphertext_bits_string, rounds_trace)
+```
+
+`rounds_trace` records `left` and `right` (as binary strings) after every round for the step-by-step visualization.
 
 #### ECB Mode Encryption: `des_encrypt(text, key, mode="ecb", iv=None)`
 
-**ECB (Electronic Codebook)**:
-
 ```
-INPUT: arbitrary text, key string, mode="ecb"
+INPUT: arbitrary text, key string (up to 8 bytes), mode="ecb"
 
-1. Convert key to 64-bit bit string (pad/truncate to 8 bytes)
-2. Derive 16 round keys
-3. For each 8-byte block of plaintext (pad last block with zeros):
-     ciphertext_block = process_des_block(block, round_keys)
-4. Concatenate all ciphertext blocks → hex string
+1. Truncate / zero-pad key to exactly 8 bytes, convert to 64-bit string
+2. Run key schedule → 16 round keys
+3. For each 8-byte plaintext block (last block zero-padded):
+     ciphertext_block = _des_process_block(block, round_keys)
+4. Concatenate all blocks → hex string
 
 OUTPUT: {
-  "mode": "ecb",
+  "mode": "ECB",
   "ciphertextHex": "a1b2c3...",
   "blocks": [...],
-  "rounds": [...]  // trace for visualization
+  "rounds": [...]
 }
 ```
 
-**Weakness of ECB**: Identical plaintext blocks produce identical ciphertext blocks. This leaks patterns.
+**Weakness of ECB**: identical plaintext blocks → identical ciphertext blocks, leaking patterns.
 
-#### CBC Mode Encryption: `des_encrypt(text, key, mode="cbc", iv=...)`
-
-**CBC (Cipher Block Chaining)**:
+#### CBC Mode: `des_encrypt(text, key, mode="cbc", iv=...)`
 
 ```
-INPUT: text, key, mode="cbc", iv (8-byte hex or random)
-
 For each block i:
-  1. XOR plaintext_block[i] with previous_ciphertext_block (or IV for i=0)
-  2. Encrypt the XOR result through DES
-  3. Output = encrypted result, becomes "previous" for next block
-
-OUTPUT: same structure as ECB with chaining info added
+  1. XOR plaintext_block[i] with IV (i=0) or previous ciphertext block
+  2. Encrypt through DES
+  3. Output becomes "previous" for next block
 ```
 
-CBC hides patterns: identical plaintext blocks produce different ciphertext because each block depends on all previous blocks.
+Decryption reverses the 16 round keys (K_16 first, K_1 last) — the Feistel property guarantees inversion.
 
-#### Decryption
+#### Code Walkthrough
 
-Decryption uses `round_keys` in **reversed** order (round_keys[15] first, round_keys[0] last). The Feistel structure ensures this correctly inverts the encryption. For CBC, XOR each decrypted block with the previous ciphertext block (or IV for first block).
-
-#### Line-by-Line Code Walkthrough
-
-**`derive_round_keys(bits)` — `symmetric.py` lines 4–16**
+**`_des_key_schedule(key_bits_str)` — `symmetric.py`**
 
 ```python
-def derive_round_keys(bits):
-    rolling = (bits + "0" * 64)[:64]
-    # Pad the input bit string to exactly 64 bits
-    # Extra bits are zeros; if input is longer than 64 only first 64 used
-
-    keys = []
-    for _ in range(16):
-        rolling = rolling[3:] + rolling[:3]
-        # Rotate left by 3: take chars [3:] first, then wrap chars [:3] to end
-        # This is the key diffusion step — each round key differs from the last
-
-        keys.append(rolling[:32])
-        # Take the first 32 bits as this round's key
-        # Remaining 32 bits carry forward into the next rotation
-
-    return keys
-    # List of 16 × 32-bit strings, one per Feistel round
+def _des_key_schedule(key_bits_str):
+    key_bits = _str_to_list((key_bits_str + "0" * 64)[:64])
+    cd = _permute(key_bits, _DES_PC1)      # 64 → 56 bits, strips parity
+    c, d = cd[:28], cd[28:]                # C and D halves
+    round_keys = []
+    for shift in _DES_SHIFTS:              # [1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1]
+        c = _rotate_left_bits(c, shift)
+        d = _rotate_left_bits(d, shift)
+        round_keys.append(_permute(c + d, _DES_PC2))  # 56 → 48 bits
+    return round_keys                      # 16 × 48-bit keys
 ```
 
-**`feistel_round(left, right, round_key)` — `symmetric.py` lines 19–27**
+**`_des_round_function(right_bits, round_key_bits)` — `symmetric.py`**
 
 ```python
-def feistel_round(left, right, round_key):
-    expanded = right + right[:16]
-    # Pseudo-expansion: append first 16 bits of right to itself
-    # Makes expanded = 48 bits, which is then trimmed to 32 for XOR
-
-    mixed = "".join("0" if a == b else "1" for a, b in zip(expanded[:32], round_key))
-    # XOR expanded[:32] with round_key bit-by-bit
-    # "0 if a==b else 1" is XOR semantics: same bits → 0, different → 1
-
-    new_right = "".join("0" if a == b else "1" for a, b in zip(left, mixed))
-    # XOR left with the mixed result to produce the new right half
-    # This is the F(R, K) XOR L core of every Feistel cipher
-
-    return right, new_right
-    # Feistel swap: old right becomes new left, computed value becomes new right
-    # This swap is what makes Feistel invertible with reversed keys
+def _des_round_function(right_bits, round_key_bits):
+    expanded = _permute(right_bits, _DES_E)            # 32 → 48 bits
+    xored    = _xor_lists(expanded, round_key_bits)    # XOR with round key
+    sbox_out = []
+    for i in range(8):
+        sbox_out.extend(_sbox_lookup(xored[i*6:(i+1)*6], i))  # 6→4 per box
+    return _permute(sbox_out, _DES_P)                  # P permutation
 ```
 
-**`process_des_block(block, round_keys)` — `symmetric.py` lines 30–42**
+**`_sbox_lookup(six_bits, box_index)` — `symmetric.py`**
 
 ```python
-def process_des_block(block, round_keys):
-    left, right = block[:32], block[32:64]
-    # Split the 64-bit block into two 32-bit halves
-
-    rounds = []
-    for index, round_key in enumerate(round_keys):
-        left, right = feistel_round(left, right, round_key)
-        # Apply one Feistel round; result swaps halves each time
-        # After 16 rounds the halves have been mixed 16 times
-
-        rounds.append({"round": index + 1, "left": left, "right": right})
-        # Record L and R after every round for the visualization
-
-    return right + left, rounds
-    # Final swap: concatenate right then left (DES output convention)
-    # rounds list feeds the bit-level visualization in the UI
+def _sbox_lookup(six_bits, box_index):
+    row = (six_bits[0] << 1) | six_bits[5]            # outer bits → row 0-3
+    col = (six_bits[1] << 3) | (six_bits[2] << 2) \
+        | (six_bits[3] << 1) |  six_bits[4]           # inner bits → col 0-15
+    val = _DES_SBOXES[box_index][row * 16 + col]       # table lookup
+    return [(val >> (3 - i)) & 1 for i in range(4)]   # 4-bit output
 ```
 
-**`des_encrypt(text, key, mode, iv)` — `symmetric.py` lines 149–201**
+**`des_encrypt(text, key, mode, iv)` — `symmetric.py`**
 
 ```python
 def des_encrypt(text, key, mode="ecb", iv=None):
-    key_bits = string_to_bits(key or "secret!!")
-    # Convert key string to bit string (8 bits per char)
-    # "secret!!" → 64-bit key bit string
-
-    round_keys = derive_round_keys(key_bits)
-    # Generate the 16 round keys from the key bit string
-
-    mode = (mode or "ecb").lower()
-    # Normalize mode string to lowercase for comparison
-
-    blocks = split_text_blocks(text, 8)
-    # Split plaintext into 8-byte chunks, padding last chunk with \x00
-
-    previous_bits = None
-    if mode == "cbc":
-        previous_bits = bin(int(normalize_hex_iv(iv, 16), 16))[2:].zfill(64)
-        # Convert hex IV to 64-bit binary string for CBC chaining
-        # normalize_hex_iv handles missing IV by defaulting to all zeros
-
-    ciphertext_parts = []
-    block_traces = []
+    raw_key   = (key or "secret!!")[:8].ljust(8, "\x00")  # 8-byte key
+    key_bits  = string_to_bits(raw_key)
+    round_keys = _des_key_schedule(key_bits)
 
     for block_index, chunk in enumerate(blocks):
-        plain_bits = string_to_bits(chunk)
-        # Convert this 8-byte text block to 64 bits
-
-        chain_bits = xor_bits(plain_bits, previous_bits) if mode == "cbc" else plain_bits
-        # CBC: XOR with previous ciphertext (or IV for first block)
-        # ECB: use plaintext bits directly, no chaining
-
-        cipher_bits, block_rounds = process_des_block(chain_bits, round_keys)
-        # Run the 64 bits through all 16 Feistel rounds
-
-        cipher_hex = bits_to_block_hex(cipher_bits, 8)
-        # Convert output bits to 16-char hex string (8 bytes = 16 hex digits)
-
-        ciphertext_parts.append(cipher_hex)
-        block_traces.append({...})
-        # Save per-block trace for the UI
-
-        if mode == "cbc":
-            previous_bits = cipher_bits
-            # Advance CBC chain: this block's ciphertext becomes next block's XOR input
-
-    return {"mode": ..., "ciphertextHex": "".join(ciphertext_parts), "rounds": ..., "blocks": ...}
-    # ciphertextHex is all blocks concatenated as one hex string
+        plain_bits  = string_to_bits(chunk)
+        chain_bits  = xor_bits(plain_bits, previous_bits) if mode == "cbc" else plain_bits
+        cipher_bits, block_rounds = _des_process_block(chain_bits, round_keys)
+        # cipher_bits is the IP + 16 Feistel rounds + FP output
 ```
 
-**`des_decrypt(hex_text, key, mode, iv)` — `symmetric.py` lines 204–257**
+**`des_decrypt(hex_text, key, mode, iv)` — `symmetric.py`**
 
 ```python
 def des_decrypt(hex_text, key, mode="ecb", iv=None):
-    key_bits = string_to_bits(key or "secret!!")
-    round_keys = list(reversed(derive_round_keys(key_bits)))
-    # CRITICAL difference from encrypt: round keys are reversed
-    # round_keys[0] is now what was round_keys[15] during encryption
-    # This is the Feistel property: same structure, reverse key order = inversion
-
-    blocks = split_hex_blocks(hex_text, 16)
-    # Split hex ciphertext into 16-hex-char (8-byte) blocks
-
-    for block_index, chunk in enumerate(blocks):
-        cipher_bits = bin(int(chunk, 16))[2:].zfill(64)
-        # Convert hex block back to 64-bit binary
-
-        chain_bits, block_rounds = process_des_block(cipher_bits, round_keys)
-        # Run reversed round keys through same Feistel structure = decryption
-
-        plain_bits = xor_bits(chain_bits, previous_bits) if mode == "cbc" else chain_bits
-        # CBC: XOR result with previous ciphertext block (or IV) to recover plaintext
-        # ECB: result is directly the plaintext bits
-
-        plaintext_parts.append(bits_to_string(plain_bits))
-        # Convert bits back to text
-
-        if mode == "cbc":
-            previous_bits = cipher_bits
-            # Advance chain using CIPHERTEXT (not plaintext) for CBC
-
-    plaintext = "".join(plaintext_parts).rstrip("\x00")
-    # Strip null padding added during encryption
+    round_keys = list(reversed(_des_key_schedule(key_bits)))
+    # Reversed key order: K_16, K_15, ..., K_1
+    # Feistel property: same _des_process_block call, reversed keys = inversion
 ```
 
 ---
 
-### 6.4 Symmetric — AES (Toy)
+### 6.4 Symmetric — AES (FIPS 197)
 
 **File**: `server/python/algorithms/symmetric.py`  
-**Functions**: `aes_encrypt`, `aes_decrypt`, `aes_encrypt_block`, `sbox`, `inv_sbox`, `shift_rows`, `inv_shift_rows`, `mix_columns`, `inv_mix_columns`, `expand_key`
+**Functions**: `aes_encrypt`, `aes_decrypt`, `_aes_encrypt_block`, `_aes_decrypt_block`, `_aes_sub_bytes`, `_aes_inv_sub_bytes`, `_aes_shift_rows`, `_aes_inv_shift_rows`, `_aes_mix_columns`, `_aes_inv_mix_columns`, `_aes_key_expansion`
 
 #### What It Is
 
-AES (Advanced Encryption Standard) is the current gold standard for symmetric encryption. It uses a **substitution-permutation network** (SPN) rather than a Feistel network. The state is a 4×4 matrix of bytes (16 bytes = 128 bits), processed through 10 rounds of four operations each.
+AES (Advanced Encryption Standard, FIPS 197) is the current gold standard for symmetric encryption. It uses a **substitution-permutation network** (SPN). The state is a 4×4 column-major byte matrix (16 bytes = 128 bits), processed through 10 rounds (for AES-128) of four operations each.
 
-This is a toy implementation using simplified versions of AES operations to preserve the structural concept while remaining readable.
+This implementation follows the full FIPS 197 specification: the complete 256-entry Rijndael S-box, correct ShiftRows, GF(2⁸) MixColumns with precomputed multiplication tables, and the standard RotWord/SubWord/Rcon key expansion.
 
-#### Block and Key Sizes
+#### Block and Key Parameters
 
-| Parameter | Real AES-128 | This Implementation |
-|-----------|-------------|-------------------|
-| Block size | 128 bits (16 bytes) | 128 bits (16 bytes) |
-| Key size | 128 bits (16 bytes) | First 16 bytes used |
-| Rounds | 10 | 10 |
+| Parameter | Value |
+|-----------|-------|
+| Block size | 128 bits (16 bytes) |
+| Key size | 128 bits (16 bytes); truncated / zero-padded from input string |
+| Rounds | 10 (Nr = 10 for Nk = 4) |
+| Round keys | 11 × 16 bytes (initial + 10 rounds) |
+
+#### State Layout
+
+The state is a flat 16-byte list stored **column-major**: `state[row + col*4]`.
+
+```
+state[ 0]  state[ 4]  state[ 8]  state[12]   ← row 0
+state[ 1]  state[ 5]  state[ 9]  state[13]   ← row 1
+state[ 2]  state[ 6]  state[10]  state[14]   ← row 2
+state[ 3]  state[ 7]  state[11]  state[15]   ← row 3
+  col 0      col 1      col 2      col 3
+```
 
 #### The Four AES Operations
 
-**1. SubBytes — `sbox(value)` / `inv_sbox(value)`**
+**1. SubBytes — `_aes_sub_bytes(state)` / `_aes_inv_sub_bytes(state)`**
 
-Each byte in the state is replaced by a non-linear substitution:
-
-```python
-# Forward S-box (simplified)
-sbox(v) = rotate_left(v XOR 0x63, 1) XOR 0x1B
-
-# Inverse S-box reverses the above
-inv_sbox(v) = ...
-```
-
-The real AES S-box is derived from the multiplicative inverse in GF(2⁸) followed by an affine transformation. This non-linearity is what makes AES resistant to linear and differential cryptanalysis.
-
-**2. ShiftRows — `shift_rows(state)` / `inv_shift_rows(state)`**
-
-The 16-byte state is viewed as a 4×4 column-major matrix. Each row is cyclically shifted left:
+Each of the 16 bytes is replaced via the Rijndael S-box, a fixed 256-entry lookup table built from the multiplicative inverse in GF(2⁸) composed with an affine transformation over GF(2):
 
 ```
-Row 0: no shift      →  [b0,  b4,  b8,  b12]  unchanged
-Row 1: shift left 1  →  [b5,  b9,  b13, b1 ]
-Row 2: shift left 2  →  [b10, b14, b2,  b6 ]
-Row 3: shift left 3  →  [b15, b3,  b7,  b11]
+SBOX[0x00] = 0x63,  SBOX[0x01] = 0x7c,  ...,  SBOX[0xff] = 0x16
 ```
 
-Inverse shifts right by the same amounts. ShiftRows ensures that bytes from different columns mix together over multiple rounds.
+The non-linearity of the GF(2⁸) inversion is what makes AES resistant to linear and differential cryptanalysis.
 
-**3. MixColumns — `mix_columns(state)` / `inv_mix_columns(state)`**
+**2. ShiftRows — `_aes_shift_rows(state)` / `_aes_inv_shift_rows(state)`**
 
-Processes each 4-byte column independently. Each byte in the output column is a combination (XOR + shift) of all bytes in the input column:
+Each row of the 4×4 matrix is cyclically shifted left by its row index:
 
-```python
-# Simplified version: triangular XOR chain per column
-new_col[0] = col[0] XOR col[1]
-new_col[1] = col[1] XOR col[2]
-new_col[2] = col[2] XOR col[3]
-new_col[3] = col[3] XOR col[0]
+```
+Row 0: no shift    →  state[0,  4,  8, 12]  unchanged
+Row 1: shift left 1   state[1,  5,  9, 13]  → [5,  9, 13,  1]
+Row 2: shift left 2   state[2,  6, 10, 14]  → [10, 14,  2,  6]
+Row 3: shift left 3   state[3,  7, 11, 15]  → [15,  3,  7, 11]
 ```
 
-Real AES uses multiplication in GF(2⁸) with a specific MDS matrix. The purpose is **diffusion**: one byte of input affects all four bytes of the column.
+ShiftRows ensures bytes from different columns are mixed together over successive rounds (inter-column diffusion).
 
-MixColumns is skipped in the final round (round 10).
+**3. MixColumns — `_aes_mix_columns(state)` / `_aes_inv_mix_columns(state)`**
+
+Each 4-byte column is multiplied by a fixed MDS matrix in GF(2⁸) with irreducible polynomial x⁸+x⁴+x³+x+1 (0x11b):
+
+```
+Forward matrix:          Inverse matrix:
+[ 2  3  1  1 ]          [14 11 13  9 ]
+[ 1  2  3  1 ]    ×     [ 9 14 11 13 ]
+[ 1  1  2  3 ]          [13  9 14 11 ]
+[ 3  1  1  2 ]          [11 13  9 14 ]
+```
+
+Multiplication by 2 is `xtime(a) = (a << 1) XOR 0x1b if MSB set, else (a << 1)`.  
+Multiplication by 3 is `xtime(a) XOR a`. Larger multipliers (9, 11, 13, 14) are computed by chaining xtime. All six multipliers are precomputed into lookup tables (`_GF[factor][byte]`) for performance.
+
+MixColumns is skipped in round 10 (final round), matching the FIPS 197 specification.
 
 **4. AddRoundKey — inline XOR**
 
-XOR the entire state with the 16-byte round key:
+XOR the 16-byte state with the 16-byte round key:
 
 ```
 state[i] = state[i] XOR round_key[i]   for i = 0..15
 ```
 
-This is the only step that involves the key. All other steps provide confusion and diffusion.
+This is the only step involving key material. All other steps are key-independent.
 
-#### Key Expansion: `expand_key(key_bytes)`
+#### Key Expansion: `_aes_key_expansion(key_bytes)`
 
-Generates 10 round keys from the initial 16-byte key:
-
-```python
-for round in range(10):
-    for i in range(16):
-        key_bytes[i] = sbox(key_bytes[i]) XOR round_number
-OUTPUT: list of 10 × 16-byte round keys
-```
-
-Real AES key expansion uses a more complex schedule involving RotWord, SubWord, and Rcon constants.
-
-#### Full Block Encryption: `aes_encrypt_block(state, key_bytes, round_keys)`
+Generates 11 round keys from the 16-byte key (FIPS 197 §5.2):
 
 ```
-Initial key whitening:
-  state = state XOR original_key
+W[0..3] = key words (4 bytes each)
+For i = 4 to 43:
+  temp = W[i-1]
+  if i % 4 == 0:
+    temp = SubWord(RotWord(temp)) XOR [Rcon[i/4], 0, 0, 0]
+  W[i] = W[i-4] XOR temp
 
-For round = 0 to 9:
-  SubBytes  (apply S-box to each byte)
-  ShiftRows (cyclic row shifts)
-  MixColumns (skip in round 9)
-  AddRoundKey (XOR with round_keys[round])
-
-OUTPUT: (encrypted_state, rounds_trace)
+Round key r = W[4r] || W[4r+1] || W[4r+2] || W[4r+3]  (r = 0..10)
 ```
 
-`rounds_trace` captures the 4×4 matrix after each operation in every round — this feeds the AES heat-map visualizations.
+- **RotWord**: left-rotate 4-byte word by 1 byte: `[a,b,c,d] → [b,c,d,a]`
+- **SubWord**: apply S-box to each of the 4 bytes
+- **Rcon**: `[0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]`
+
+#### Full Block Encryption: `_aes_encrypt_block(state, round_keys)`
+
+```
+AddRoundKey(state, round_keys[0])      ← initial key whitening
+
+For round = 1 to 10:
+  SubBytes(state)
+  ShiftRows(state)
+  if round < 10: MixColumns(state)    ← skipped in final round
+  AddRoundKey(state, round_keys[round])
+
+OUTPUT: (ciphertext_bytes, rounds_trace)
+```
+
+#### Full Block Decryption: `_aes_decrypt_block(state, round_keys)`
+
+```
+AddRoundKey(state, round_keys[10])
+
+For round = 9 down to 0:
+  InvShiftRows(state)
+  InvSubBytes(state)
+  AddRoundKey(state, round_keys[round])
+  if round > 0: InvMixColumns(state)
+
+OUTPUT: (plaintext_bytes, rounds_trace)
+```
 
 #### ECB and CBC Modes
 
 Work identically to DES modes (see section 6.3) but with 16-byte blocks instead of 8-byte blocks.
 
-#### Line-by-Line Code Walkthrough
+#### Code Walkthrough
 
-**`sbox(value)` and `inv_sbox(value)` — `symmetric.py` lines 265–272**
+**`_aes_key_expansion(key_bytes)` — `symmetric.py`**
 
 ```python
-def sbox(value):
-    return rotate_left(value ^ 0x63, 1) ^ 0x1B
-    # Step 1: XOR byte with 0x63 (99 decimal) — affine constant
-    # Step 2: rotate_left(..., 1) — circular left shift by 1 bit within the byte
-    #         rotate_left(v, 1) = ((v << 1) | (v >> 7)) & 0xFF
-    # Step 3: XOR result with 0x1B — second affine constant
-    # This is a simplified substitute for AES GF(2^8) inversion + affine transform
-
-def inv_sbox(value):
-    return rotate_left(value ^ 0x1B, 7) ^ 0x63
-    # Exactly reverses sbox:
-    # Step 1: XOR with 0x1B undoes the final XOR in sbox
-    # Step 2: rotate_left(..., 7) is a right-rotate-by-1 (since 8-7=1)
-    #         rotating right by 1 undoes the left rotation in sbox
-    # Step 3: XOR with 0x63 undoes the first XOR in sbox
+def _aes_key_expansion(key_bytes):
+    w = [list(key_bytes[i*4:(i+1)*4]) for i in range(4)]  # W[0..3]
+    for i in range(4, 44):
+        temp = w[i-1][:]
+        if i % 4 == 0:
+            temp = temp[1:] + temp[:1]               # RotWord
+            temp = [_AES_SBOX[b] for b in temp]      # SubWord
+            temp[0] ^= _AES_RCON[i // 4 - 1]         # XOR Rcon (first byte only)
+        w.append([w[i-4][j] ^ temp[j] for j in range(4)])
+    # Flatten W into 11 sixteen-byte round keys
+    return [sum((w[r*4+k] for k in range(4)), []) for r in range(11)]
 ```
 
-**`shift_rows(state)` and `inv_shift_rows(state)` — `symmetric.py` lines 275–302**
+**`_aes_mix_columns(state)` — `symmetric.py`**
 
 ```python
-def shift_rows(state):
-    output = state[:]          # shallow copy so original isn't mutated
-
-    for row_index in range(4):
-        # AES state is stored column-major: state[col*4 + row]
-        # To get row row_index: elements at positions row_index, row_index+4, row_index+8, row_index+12
-
-        row = [state[row_index], state[row_index+4], state[row_index+8], state[row_index+12]]
-        # Extract the 4 bytes of this row across all 4 columns
-
-        shifted = row[row_index:] + row[:row_index]
-        # Cyclic left shift by row_index positions:
-        # row 0: shift 0 (no change)
-        # row 1: shift 1 (first element goes to end)
-        # row 2: shift 2
-        # row 3: shift 3
-
-        output[row_index], output[row_index+4], output[row_index+8], output[row_index+12] = shifted
-        # Write shifted row back into the column-major positions
-
-    return output
-
-def inv_shift_rows(state):
-    # Same structure, but rotates RIGHT instead of left
-    shifted = row[4 - row_index:] + row[:4 - row_index]
-    # row 0: shift 0 (no change); row 1: shift right 1 = shift left 3; etc.
-    # This exactly undoes shift_rows
+def _aes_mix_columns(state):
+    g = _GF   # precomputed GF(2^8) multiplication tables
+    result = [0] * 16
+    for c in range(4):
+        a = state[c*4:(c+1)*4]            # column bytes a[0..3]
+        result[c*4]   = g[2][a[0]] ^ g[3][a[1]] ^ a[2]        ^ a[3]
+        result[c*4+1] = a[0]        ^ g[2][a[1]] ^ g[3][a[2]] ^ a[3]
+        result[c*4+2] = a[0]        ^ a[1]        ^ g[2][a[2]] ^ g[3][a[3]]
+        result[c*4+3] = g[3][a[0]] ^ a[1]         ^ a[2]       ^ g[2][a[3]]
+    return result
 ```
 
-**`mix_columns(state)` and `inv_mix_columns(state)` — `symmetric.py` lines 305–344**
+**`_aes_encrypt_block(state, round_keys)` — `symmetric.py`**
 
 ```python
-def mix_columns(state):
-    output = state[:]
-    for column in range(4):
-        index = column * 4        # columns are stored at [0..3], [4..7], [8..11], [12..15]
-        a0, a1, a2, a3 = state[index], state[index+1], state[index+2], state[index+3]
-        # Read the 4 bytes of this column
-
-        output[index]   = (a0 ^ a1) & 0xFF   # byte 0 gets XOR of bytes 0 and 1
-        output[index+1] = (a1 ^ a2) & 0xFF   # byte 1 gets XOR of bytes 1 and 2
-        output[index+2] = (a2 ^ a3) & 0xFF   # byte 2 gets XOR of bytes 2 and 3
-        output[index+3] =  a3       & 0xFF   # byte 3 unchanged (keeps invertibility)
-        # This triangular XOR chain ensures each output byte depends on input bytes
-        # & 0xFF masks to single byte range
-
-def inv_mix_columns(state):
-    # Reverses by solving the XOR chain from the tail:
-    output[index+3] = b3                            # b3 = a3 (unchanged)
-    output[index+2] = (b2 ^ output[index+3]) & 0xFF # recover a2: b2 = a2^a3, so a2 = b2^a3
-    output[index+1] = (b1 ^ output[index+2]) & 0xFF # recover a1: b1 = a1^a2, so a1 = b1^a2
-    output[index]   = (b0 ^ output[index+1]) & 0xFF # recover a0: b0 = a0^a1, so a0 = b0^a1
-```
-
-**`expand_key(key_bytes)` — `symmetric.py` lines 347–359**
-
-```python
-def expand_key(key_bytes):
-    keys = []
-    current = key_bytes[:]        # start from copy of original 16-byte key
-
-    for round_index in range(10):
-        current = [sbox(byte ^ ((round_index + 1 + index) & 0xFF))
-                   for index, byte in enumerate(current)]
-        # For each byte position:
-        #   1. XOR the byte with (round_index + 1 + position) masked to 8 bits
-        #      This mixes round number and position into the key material
-        #   2. Apply sbox() to add non-linearity
-        # This ensures each round key is different and non-linearly derived from the previous
-
-        keys.append(current[:])
-        # Snapshot the current key state as this round's key
-
-    return keys    # List of 10 × 16-byte lists
-```
-
-**`aes_encrypt_block(state, key_bytes, round_keys)` — `symmetric.py` lines 362–382**
-
-```python
-def aes_encrypt_block(state, key_bytes, round_keys):
-    state = xor_bytes(state, key_bytes)
-    # Initial key whitening: XOR every byte with corresponding key byte
-    # This is AddRoundKey before the first round
-    # Without this, round 0 would operate on raw plaintext
-
+def _aes_encrypt_block(state, round_keys):
+    state = _aes_add_round_key(state, round_keys[0])   # initial whitening
     rounds = []
-    for round_index in range(10):
-        state = [sbox(byte) for byte in state]
-        # SubBytes: apply S-box to every one of the 16 bytes independently
-        # Provides non-linearity (confusion)
-
-        state = shift_rows(state)
-        # ShiftRows: cyclic row shifts on the 4×4 matrix
-        # Provides inter-column diffusion
-
-        if round_index < 9:
-            state = mix_columns(state)
-            # MixColumns: XOR-mix within each 4-byte column
-            # NOT applied in the final round (round 9) — AES specification rule
-            # Skipping it in round 10 makes decryption symmetric
-
-        state = xor_bytes(state, round_keys[round_index])
-        # AddRoundKey: XOR with this round's derived key
-        # Only step that introduces key material into the state
-
-        rounds.append({"round": round_index + 1, "stateHex": bytes_to_hex(state)})
-        # Save hex snapshot of state after this round for the heatmap UI
-
+    for r in range(1, 11):
+        state = _aes_sub_bytes(state)
+        state = _aes_shift_rows(state)
+        if r < 10:
+            state = _aes_mix_columns(state)            # skip in final round
+        state = _aes_add_round_key(state, round_keys[r])
+        rounds.append({"round": r, "stateHex": bytes_to_hex(state)})
     return state, rounds
-    # state is the 16-byte ciphertext; rounds feeds the visualization
-```
-
-**`aes_decrypt_block(state, key_bytes, round_keys)` — `symmetric.py` lines 385–405**
-
-```python
-def aes_decrypt_block(state, key_bytes, round_keys):
-    rounds = []
-    for round_index in range(9, -1, -1):
-        # Walk rounds BACKWARDS: 9, 8, 7, ..., 0
-
-        state = xor_bytes(state, round_keys[round_index])
-        # Undo AddRoundKey first (same XOR undoes itself)
-
-        if round_index < 9:
-            state = inv_mix_columns(state)
-            # Undo MixColumns (not applied for index 9 = last encryption round)
-
-        state = inv_shift_rows(state)
-        # Undo ShiftRows
-
-        state = [inv_sbox(byte) for byte in state]
-        # Undo SubBytes
-
-        rounds.append({"round": 10 - round_index, ...})
-
-    state = xor_bytes(state, key_bytes)
-    # Undo the initial key whitening from encrypt
-
-    return state, rounds
-```
-
-**`aes_encrypt(text, key, mode, iv)` — `symmetric.py` lines 408–455**
-
-```python
-def aes_encrypt(text, key, mode="ecb", iv=None):
-    key_bytes = text_to_bytes(key or "sixteen-char-key")
-    # Convert key string to exactly 16 bytes (truncate or zero-pad)
-
-    round_keys = expand_key(key_bytes)
-    # Derive 10 round keys from the 16-byte key
-
-    blocks = split_text_blocks(text, 16)
-    # Split plaintext into 16-byte blocks; last block zero-padded
-
-    previous_state = hex_iv_bytes(iv, 16) if mode == "cbc" else None
-    # For CBC: parse IV as 16-byte list; for ECB: no chain state
-
-    for block_index, chunk in enumerate(blocks):
-        plain_state = text_to_bytes(chunk)
-        # Convert 16-char text block to list of 16 integer bytes
-
-        chain_state = xor_bytes(plain_state, previous_state) if mode == "cbc" else plain_state
-        # CBC: XOR with IV (first block) or previous ciphertext (subsequent blocks)
-
-        cipher_state, block_rounds = aes_encrypt_block(chain_state, key_bytes, round_keys)
-        # Run through 10 rounds of SubBytes + ShiftRows + MixColumns + AddRoundKey
-
-        cipher_hex = bytes_to_hex(cipher_state)
-        # Convert 16-byte output to 32-char hex string
-
-        if mode == "cbc":
-            previous_state = cipher_state[:]
-            # Advance chain: this ciphertext block XORed into next plaintext block
 ```
 
 ---

@@ -1,179 +1,227 @@
 from algorithms.common import bits_to_string, bytes_to_hex, hex_to_bytes, mod, mod_inv, string_to_bits, text_to_bytes
 
-# Derive a list of pseudo round keys from the key bits.
-def derive_round_keys(bits):
-    # Pad the bit string to a fixed 64-bit working area.
-    rolling = (bits + "0" * 64)[:64]
-    # Store all the round keys here.
-    keys = []
-    # Build sixteen round keys for the DES-style demo.
-    for _ in range(16):
-        # Rotate the working bits left by three positions.
-        rolling = rolling[3:] + rolling[:3]
-        # Keep the first half as the round key.
-        keys.append(rolling[:32])
-    # Return the full round key schedule.
-    return keys
+_DES_PC1 = [
+    57,49,41,33,25,17, 9,
+     1,58,50,42,34,26,18,
+    10, 2,59,51,43,35,27,
+    19,11, 3,60,52,44,36,
+    63,55,47,39,31,23,15,
+     7,62,54,46,38,30,22,
+    14, 6,61,53,45,37,29,
+    21,13, 5,28,20,12, 4,
+]
 
-# Apply the toy Feistel round used by the DES-style cipher.
-def feistel_round(left, right, round_key):
-    # Expand the right side with a small repeated pattern.
-    expanded = right + right[:16]
-    # Mix the expanded right side with the round key.
-    mixed = "".join("0" if a == b else "1" for a, b in zip(expanded[:32], round_key))
-    # XOR the mixed data into the left side.
-    new_right = "".join("0" if a == b else "1" for a, b in zip(left, mixed))
-    # Return the new block ordering.
-    return right, new_right
+_DES_PC2 = [
+    14,17,11,24, 1, 5,
+     3,28,15, 6,21,10,
+    23,19,12, 4,26, 8,
+    16, 7,27,20,13, 2,
+    41,52,31,37,47,55,
+    30,40,51,45,33,48,
+    44,49,39,56,34,53,
+    46,42,50,36,29,32,
+]
 
-# Process a single 64-bit block through all rounds.
-def process_des_block(block, round_keys):
-    # Split the block into left and right halves.
-    left, right = block[:32], block[32:64]
-    # Keep a trace of every round here.
+_DES_SHIFTS = [1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1]
+
+_DES_IP = [
+    58,50,42,34,26,18,10, 2,
+    60,52,44,36,28,20,12, 4,
+    62,54,46,38,30,22,14, 6,
+    64,56,48,40,32,24,16, 8,
+    57,49,41,33,25,17, 9, 1,
+    59,51,43,35,27,19,11, 3,
+    61,53,45,37,29,21,13, 5,
+    63,55,47,39,31,23,15, 7,
+]
+
+_DES_FP = [
+    40, 8,48,16,56,24,64,32,
+    39, 7,47,15,55,23,63,31,
+    38, 6,46,14,54,22,62,30,
+    37, 5,45,13,53,21,61,29,
+    36, 4,44,12,52,20,60,28,
+    35, 3,43,11,51,19,59,27,
+    34, 2,42,10,50,18,58,26,
+    33, 1,41, 9,49,17,57,25,
+]
+
+_DES_E = [
+    32, 1, 2, 3, 4, 5,
+     4, 5, 6, 7, 8, 9,
+     8, 9,10,11,12,13,
+    12,13,14,15,16,17,
+    16,17,18,19,20,21,
+    20,21,22,23,24,25,
+    24,25,26,27,28,29,
+    28,29,30,31,32, 1,
+]
+
+_DES_P = [
+    16, 7,20,21,
+    29,12,28,17,
+     1,15,23,26,
+     5,18,31,10,
+     2, 8,24,14,
+    32,27, 3, 9,
+    19,13,30, 6,
+    22,11, 4,25,
+]
+
+_DES_SBOXES = [
+    [14, 4,13, 1, 2,15,11, 8, 3,10, 6,12, 5, 9, 0, 7,
+      0,15, 7, 4,14, 2,13, 1,10, 6,12,11, 9, 5, 3, 8,
+      4, 1,14, 8,13, 6, 2,11,15,12, 9, 7, 3,10, 5, 0,
+     15,12, 8, 2, 4, 9, 1, 7, 5,11, 3,14,10, 0, 6,13],
+    [15, 1, 8,14, 6,11, 3, 4, 9, 7, 2,13,12, 0, 5,10,
+      3,13, 4, 7,15, 2, 8,14,12, 0, 1,10, 6, 9,11, 5,
+      0,14, 7,11,10, 4,13, 1, 5, 8,12, 6, 9, 3, 2,15,
+     13, 8,10, 1, 3,15, 4, 2,11, 6, 7,12, 0, 5,14, 9],
+    [10, 0, 9,14, 6, 3,15, 5, 1,13,12, 7,11, 4, 2, 8,
+     13, 7, 0, 9, 3, 4, 6,10, 2, 8, 5,14,12,11,15, 1,
+     13, 6, 4, 9, 8,15, 3, 0,11, 1, 2,12, 5,10,14, 7,
+      1,10,13, 0, 6, 9, 8, 7, 4,15,14, 3,11, 5, 2,12],
+    [ 7,13,14, 3, 0, 6, 9,10, 1, 2, 8, 5,11,12, 4,15,
+     13, 8,11, 5, 6,15, 0, 3, 4, 7, 2,12, 1,10,14, 9,
+     10, 6, 9, 0,12,11, 7,13,15, 1, 3,14, 5, 2, 8, 4,
+      3,15, 0, 6,10, 1,13, 8, 9, 4, 5,11,12, 7, 2,14],
+    [ 2,12, 4, 1, 7,10,11, 6, 8, 5, 3,15,13, 0,14, 9,
+     14,11, 2,12, 4, 7,13, 1, 5, 0,15,10, 3, 9, 8, 6,
+      4, 2, 1,11,10,13, 7, 8,15, 9,12, 5, 6, 3, 0,14,
+     11, 8,12, 7, 1,14, 2,13, 6,15, 0, 9,10, 4, 5, 3],
+    [12, 1,10,15, 9, 2, 6, 8, 0,13, 3, 4,14, 7, 5,11,
+     10,15, 4, 2, 7,12, 9, 5, 6, 1,13,14, 0,11, 3, 8,
+      9,14,15, 5, 2, 8,12, 3, 7, 0, 4,10, 1,13,11, 6,
+      4, 3, 2,12, 9, 5,15,10,11,14, 1, 7, 6, 0, 8,13],
+    [ 4,11, 2,14,15, 0, 8,13, 3,12, 9, 7, 5,10, 6, 1,
+     13, 0,11, 7, 4, 9, 1,10,14, 3, 5,12, 2,15, 8, 6,
+      1, 4,11,13,12, 3, 7,14,10,15, 6, 8, 0, 5, 9, 2,
+      6,11,13, 8, 1, 4,10, 7, 9, 5, 0,15,14, 2, 3,12],
+    [13, 2, 8, 4, 6,15,11, 1,10, 9, 3,14, 5, 0,12, 7,
+      1,15,13, 8,10, 3, 7, 4,12, 5, 6,11, 0,14, 9, 2,
+      7,11, 4, 1, 9,12,14, 2, 0, 6,10,13,15, 3, 5, 8,
+      2, 1,14, 7, 4,10, 8,13,15,12, 9, 0, 3, 5, 6,11],
+]
+
+def _permute(bits, table):
+    return [bits[i - 1] for i in table]
+
+def _rotate_left_bits(bits, n):
+    return bits[n:] + bits[:n]
+
+def _xor_lists(a, b):
+    return [x ^ y for x, y in zip(a, b)]
+
+def _list_to_str(bits):
+    return "".join(str(b) for b in bits)
+
+def _str_to_list(s):
+    return [int(c) for c in s]
+
+def _sbox_lookup(six_bits, box_index):
+    row = (six_bits[0] << 1) | six_bits[5]
+    col = (six_bits[1] << 3) | (six_bits[2] << 2) | (six_bits[3] << 1) | six_bits[4]
+    val = _DES_SBOXES[box_index][row * 16 + col]
+    return [(val >> (3 - i)) & 1 for i in range(4)]
+
+def _des_round_function(right_bits, round_key_bits):
+    expanded = _permute(right_bits, _DES_E)
+    xored = _xor_lists(expanded, round_key_bits)
+    sbox_out = []
+    for i in range(8):
+        sbox_out.extend(_sbox_lookup(xored[i * 6:(i + 1) * 6], i))
+    return _permute(sbox_out, _DES_P)
+
+def _des_key_schedule(key_bits_str):
+    key_bits = _str_to_list((key_bits_str + "0" * 64)[:64])
+    cd = _permute(key_bits, _DES_PC1)
+    c, d = cd[:28], cd[28:]
+    round_keys = []
+    for shift in _DES_SHIFTS:
+        c = _rotate_left_bits(c, shift)
+        d = _rotate_left_bits(d, shift)
+        round_keys.append(_permute(c + d, _DES_PC2))
+    return round_keys
+
+def _des_process_block(block_bits_str, round_keys):
+    bits = _str_to_list((block_bits_str + "0" * 64)[:64])
+    bits = _permute(bits, _DES_IP)
+    left, right = bits[:32], bits[32:]
     rounds = []
-    # Run the block through each round key.
-    for index, round_key in enumerate(round_keys):
-        # Apply the Feistel round transformation.
-        left, right = feistel_round(left, right, round_key)
-        # Save the current round state for inspection.
-        rounds.append({"round": index + 1, "left": left, "right": right})
-    # Return the final block after the swap.
-    return right + left, rounds
+    for i, rk in enumerate(round_keys):
+        f_out = _des_round_function(right, rk)
+        new_right = _xor_lists(left, f_out)
+        left = right
+        right = new_right
+        rounds.append({
+            "round": i + 1,
+            "left": _list_to_str(left),
+            "right": _list_to_str(right),
+        })
+    combined = right + left
+    final = _permute(combined, _DES_FP)
+    return _list_to_str(final), rounds
 
-# XOR two equal-length bit strings.
 def xor_bits(left, right):
-    # Combine each bit position with xor semantics.
     return "".join("0" if a == b else "1" for a, b in zip(left, right))
 
-# XOR two equal-length byte lists.
 def xor_bytes(left, right):
-    # Combine each byte position with xor semantics.
     return [l ^ r for l, r in zip(left, right)]
 
-# Split text into fixed-size blocks and pad the tail with null bytes.
 def split_text_blocks(text, block_size):
-    # Keep at least one block so empty input still round-trips consistently.
     raw = text or ""
     if not raw:
         raw = "\x00" * block_size
-    # Collect block-sized chunks here.
     blocks = []
-    # Walk the text block by block.
     for index in range(0, len(raw), block_size):
-        # Pad the final chunk to the block size.
-        chunk = (raw[index : index + block_size] + "\x00" * block_size)[:block_size]
+        chunk = (raw[index:index + block_size] + "\x00" * block_size)[:block_size]
         blocks.append(chunk)
-    # Return the padded block list.
     return blocks
 
-# Split a hexadecimal string into fixed-size blocks.
 def split_hex_blocks(raw_hex, block_hex_len):
-    # Normalize the incoming hex string.
     cleaned = (raw_hex or "").replace("0x", "").strip().lower()
-    # Keep at least one block so empty input still round-trips consistently.
     if not cleaned:
         cleaned = "0" * block_hex_len
-    # Collect block-sized chunks here.
     blocks = []
-    # Walk the hex string block by block.
     for index in range(0, len(cleaned), block_hex_len):
-        # Pad the final chunk to the block size.
-        chunk = (cleaned[index : index + block_hex_len] + "0" * block_hex_len)[:block_hex_len]
+        chunk = (cleaned[index:index + block_hex_len] + "0" * block_hex_len)[:block_hex_len]
         blocks.append(chunk)
-    # Return the padded block list.
     return blocks
 
-# Convert a bit string to a zero-padded hex block.
 def bits_to_block_hex(bits, byte_width):
-    # Convert the bit string and left-pad it to the desired size.
     return hex(int(bits or "0", 2))[2:].zfill(byte_width * 2)
 
-# Convert a byte list to readable text while trimming zero padding.
 def bytes_to_text(data):
-    # Turn each byte back into a character.
     return "".join(chr(byte) for byte in data).rstrip("\x00")
 
-# Normalize a hex IV to a fixed block width.
 def normalize_hex_iv(raw_hex, block_hex_len):
-    # Strip common prefixes and whitespace.
     cleaned = (raw_hex or "").replace("0x", "").strip().lower()
-    # Fall back to zero IV for the demo.
     if not cleaned:
         cleaned = "0" * block_hex_len
-    # Pad or trim to the block width.
     return (cleaned + "0" * block_hex_len)[:block_hex_len]
 
-# Convert a hex IV into bytes.
 def hex_iv_bytes(raw_hex, block_bytes):
-    # Normalize the hex input first.
     cleaned = normalize_hex_iv(raw_hex, block_bytes * 2)
-    # Convert the normalized bytes into a list.
     return hex_to_bytes(cleaned)[:block_bytes]
 
-# Split text into fixed-size 8-byte blocks for the DES-style cipher.
-def text_to_des_blocks(text):
-    # Keep at least one block so empty input still round-trips consistently.
-    raw = text or ""
-    if not raw:
-        raw = "\x00" * 8
-    # Collect 8-byte chunks here.
-    blocks = []
-    # Walk the text eight characters at a time.
-    for index in range(0, len(raw), 8):
-        # Pad the final chunk with null bytes to a full block.
-        chunk = (raw[index : index + 8] + "\x00" * 8)[:8]
-        # Convert the block into a 64-bit bit string.
-        blocks.append(string_to_bits(chunk))
-    # Return the block list.
-    return blocks
-
-# Split a DES hex string into 64-bit blocks.
-def hex_to_des_blocks(hex_text):
-    # Normalize the incoming hex string.
-    cleaned = (hex_text or "").replace("0x", "")
-    # Keep at least one block so empty input still round-trips consistently.
-    if not cleaned:
-        return ["0" * 64]
-    # Collect 16-digit hex chunks and pad the last one if needed.
-    blocks = []
-    for index in range(0, len(cleaned), 16):
-        # Pad the final chunk to one full block.
-        chunk = (cleaned[index : index + 16] + "0" * 16)[:16]
-        # Convert the block into a 64-bit bit string.
-        blocks.append(bin(int(chunk, 16))[2:].zfill(64))
-    # Return the block list.
-    return blocks
-
-# Encrypt a short message with the DES-style block cipher.
 def des_encrypt(text, key, mode="ecb", iv=None):
-    # Turn the key into a bit string.
-    key_bits = string_to_bits(key or "secret!!")
-    # Build the round key schedule.
-    round_keys = derive_round_keys(key_bits)
-    # Normalize the requested mode.
+    raw_key = (key or "secret!!")[:8].ljust(8, "\x00")
+    key_bits = string_to_bits(raw_key)
+    round_keys = _des_key_schedule(key_bits)
     mode = (mode or "ecb").lower()
-    # Split the plaintext into fixed-size blocks.
     blocks = split_text_blocks(text, 8)
-    # Set up the CBC chain state when needed.
     previous_bits = None
     if mode == "cbc":
         previous_bits = bin(int(normalize_hex_iv(iv, 16), 16))[2:].zfill(64)
-    # Encrypt each block independently or as a CBC chain.
     ciphertext_parts = []
     block_traces = []
     rounds = []
     for block_index, chunk in enumerate(blocks):
-        # Convert the plaintext block into bits.
         plain_bits = string_to_bits(chunk)
-        # Apply CBC chaining when requested.
         chain_bits = xor_bits(plain_bits, previous_bits) if mode == "cbc" else plain_bits
-        # Run the block through the Feistel network.
-        cipher_bits, block_rounds = process_des_block(chain_bits, round_keys)
-        # Store the ciphertext for this block.
+        cipher_bits, block_rounds = _des_process_block(chain_bits, round_keys)
         cipher_hex = bits_to_block_hex(cipher_bits, 8)
         ciphertext_parts.append(cipher_hex)
-        # Store a block-level trace for the UI.
         block_traces.append({
             "index": block_index + 1,
             "plainBits": plain_bits,
@@ -182,15 +230,12 @@ def des_encrypt(text, key, mode="ecb", iv=None):
             "plainHex": bits_to_block_hex(plain_bits, 8),
             "chainHex": bits_to_block_hex(chain_bits, 8),
             "cipherHex": cipher_hex,
-            "rounds": [{**round_state, "block": block_index + 1} for round_state in block_rounds],
+            "rounds": [{**r, "block": block_index + 1} for r in block_rounds],
         })
-        # Keep the first block trace for the existing insight UI.
         if block_index == 0:
             rounds = block_traces[0]["rounds"]
-        # Advance the CBC chain when needed.
         if mode == "cbc":
             previous_bits = cipher_bits
-    # Return the full ciphertext and the round trace.
     return {
         "mode": mode.upper(),
         "ivHex": normalize_hex_iv(iv, 16) if mode == "cbc" else None,
@@ -200,34 +245,23 @@ def des_encrypt(text, key, mode="ecb", iv=None):
         "blockCount": len(blocks),
     }
 
-# Decrypt a hex string with the DES-style block cipher.
 def des_decrypt(hex_text, key, mode="ecb", iv=None):
-    # Turn the key into a bit string.
-    key_bits = string_to_bits(key or "secret!!")
-    # Rebuild the round keys and reverse their order.
-    round_keys = list(reversed(derive_round_keys(key_bits)))
-    # Normalize the requested mode.
+    raw_key = (key or "secret!!")[:8].ljust(8, "\x00")
+    key_bits = string_to_bits(raw_key)
+    round_keys = list(reversed(_des_key_schedule(key_bits)))
     mode = (mode or "ecb").lower()
-    # Split the ciphertext into fixed-size blocks.
     blocks = split_hex_blocks(hex_text, 16)
-    # Set up the CBC chain state when needed.
     previous_bits = None
     if mode == "cbc":
         previous_bits = bin(int(normalize_hex_iv(iv, 16), 16))[2:].zfill(64)
-    # Decrypt each block independently or as a CBC chain.
     plaintext_parts = []
     block_traces = []
     rounds = []
     for block_index, chunk in enumerate(blocks):
-        # Convert the current ciphertext block into bits.
         cipher_bits = bin(int(chunk, 16))[2:].zfill(64)
-        # Run the reversed round schedule.
-        chain_bits, block_rounds = process_des_block(cipher_bits, round_keys)
-        # Undo the CBC chain when requested.
+        chain_bits, block_rounds = _des_process_block(cipher_bits, round_keys)
         plain_bits = xor_bits(chain_bits, previous_bits) if mode == "cbc" else chain_bits
-        # Convert the resulting bits back into readable text.
         plaintext_parts.append(bits_to_string(plain_bits))
-        # Store a block-level trace for the UI.
         block_traces.append({
             "index": block_index + 1,
             "cipherBits": cipher_bits,
@@ -236,17 +270,13 @@ def des_decrypt(hex_text, key, mode="ecb", iv=None):
             "cipherHex": chunk,
             "chainHex": bits_to_block_hex(chain_bits, 8),
             "plainHex": bits_to_block_hex(plain_bits, 8),
-            "rounds": [{**round_state, "block": block_index + 1} for round_state in block_rounds],
+            "rounds": [{**r, "block": block_index + 1} for r in block_rounds],
         })
-        # Keep the first block trace for the existing insight UI.
         if block_index == 0:
             rounds = block_traces[0]["rounds"]
-        # Advance the CBC chain when needed.
         if mode == "cbc":
             previous_bits = cipher_bits
-    # Join the block outputs and strip padding from the tail only.
     plaintext = "".join(plaintext_parts).rstrip("\x00")
-    # Return the plaintext and the round trace.
     return {
         "mode": mode.upper(),
         "ivHex": normalize_hex_iv(iv, 16) if mode == "cbc" else None,
@@ -256,181 +286,155 @@ def des_decrypt(hex_text, key, mode="ecb", iv=None):
         "blockCount": len(blocks),
     }
 
-# Rotate an 8-bit value left by a fixed amount.
-def rotate_left(value, shift):
-    # Keep the rotated value inside one byte.
-    return ((value << shift) | (value >> (8 - shift))) & 0xFF
+_AES_SBOX = [
+    0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
+    0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
+    0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,
+    0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,
+    0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,
+    0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,
+    0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,
+    0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,
+    0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,
+    0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,
+    0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,
+    0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,
+    0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,
+    0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,
+    0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,
+    0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16,
+]
 
-# Apply the toy S-box transform.
-def sbox(value):
-    # Mix the byte and then rotate it.
-    return rotate_left(value ^ 0x63, 1) ^ 0x1B
+_AES_INV_SBOX = [0] * 256
+for _i, _v in enumerate(_AES_SBOX):
+    _AES_INV_SBOX[_v] = _i
 
-# Apply the inverse toy S-box transform.
-def inv_sbox(value):
-    # Reverse the rotate and mix pattern.
-    return rotate_left(value ^ 0x1B, 7) ^ 0x63
+_AES_RCON = [0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36]
 
-# Shift AES rows in the toy 4x4 state matrix.
-def shift_rows(state):
-    # Copy the state so we can mutate safely.
-    output = state[:]
-    # Walk each row in the 4x4 layout.
-    for row_index in range(4):
-        # Extract the row from column-major storage.
-        row = [state[row_index], state[row_index + 4], state[row_index + 8], state[row_index + 12]]
-        # Rotate the row left by the row index.
-        shifted = row[row_index:] + row[:row_index]
-        # Write the shifted row back into the state.
-        output[row_index], output[row_index + 4], output[row_index + 8], output[row_index + 12] = shifted
-    # Return the shifted state.
-    return output
+def _build_gf_tables():
+    out = {}
+    for factor in (2, 3, 9, 11, 13, 14):
+        table = []
+        for byte in range(256):
+            p, a, f = 0, byte, factor
+            for _ in range(8):
+                if f & 1:
+                    p ^= a
+                hi = a & 0x80
+                a = (a << 1) & 0xff
+                if hi:
+                    a ^= 0x1b
+                f >>= 1
+            table.append(p)
+        out[factor] = table
+    return out
 
-# Undo the AES-style row shift.
-def inv_shift_rows(state):
-    # Copy the state so we can mutate safely.
-    output = state[:]
-    # Walk each row in the 4x4 layout.
-    for row_index in range(4):
-        # Extract the row from column-major storage.
-        row = [state[row_index], state[row_index + 4], state[row_index + 8], state[row_index + 12]]
-        # Rotate the row right by the row index.
-        shifted = row[4 - row_index :] + row[: 4 - row_index]
-        # Write the shifted row back into the state.
-        output[row_index], output[row_index + 4], output[row_index + 8], output[row_index + 12] = shifted
-    # Return the restored state.
-    return output
+_GF = _build_gf_tables()
 
-# Mix the AES-style columns in the toy state.
-def mix_columns(state):
-    # Copy the state so we can mutate safely.
-    output = state[:]
-    # Walk each column in the 4x4 matrix.
-    for column in range(4):
-        # Compute the starting index for the current column.
-        index = column * 4
-        # Read the four bytes in the column.
-        a0, a1, a2, a3 = state[index], state[index + 1], state[index + 2], state[index + 3]
-        # Use a triangular xor mix so the transform remains reversible.
-        output[index] = (a0 ^ a1) & 0xFF
-        # Mix the next value.
-        output[index + 1] = (a1 ^ a2) & 0xFF
-        # Mix the third value.
-        output[index + 2] = (a2 ^ a3) & 0xFF
-        # Keep the tail byte to preserve invertibility.
-        output[index + 3] = a3 & 0xFF
-    # Return the mixed state.
-    return output
+def _aes_sub_bytes(state):
+    return [_AES_SBOX[b] for b in state]
 
-# Undo the AES-style column mix.
-def inv_mix_columns(state):
-    # Copy the state so we can mutate safely.
-    output = state[:]
-    # Walk each column in the 4x4 matrix.
-    for column in range(4):
-        # Compute the starting index for the current column.
-        index = column * 4
-        # Read the four bytes in the column.
-        b0, b1, b2, b3 = state[index], state[index + 1], state[index + 2], state[index + 3]
-        # Rebuild the original column by undoing the xor chain from the tail.
-        output[index + 3] = b3 & 0xFF
-        # Rebuild the third byte.
-        output[index + 2] = (b2 ^ output[index + 3]) & 0xFF
-        # Rebuild the second byte.
-        output[index + 1] = (b1 ^ output[index + 2]) & 0xFF
-        # Rebuild the first byte.
-        output[index] = (b0 ^ output[index + 1]) & 0xFF
-    # Return the restored state.
-    return output
+def _aes_inv_sub_bytes(state):
+    return [_AES_INV_SBOX[b] for b in state]
 
-# Expand a 16-byte AES-style key into 10 round keys.
-def expand_key(key_bytes):
-    # Store the generated keys here.
-    keys = []
-    # Start from the original key material.
-    current = key_bytes[:]
-    # Build ten round keys for the demo cipher.
-    for round_index in range(10):
-        # Mix the key bytes with the round number.
-        current = [sbox(byte ^ ((round_index + 1 + index) & 0xFF)) for index, byte in enumerate(current)]
-        # Save the current round key snapshot.
-        keys.append(current[:])
-    # Return the full round-key list.
-    return keys
+def _aes_shift_rows(state):
+    s = state[:]
+    s[1],  s[5],  s[9],  s[13] = state[5],  state[9],  state[13], state[1]
+    s[2],  s[6],  s[10], s[14] = state[10], state[14], state[2],  state[6]
+    s[3],  s[7],  s[11], s[15] = state[15], state[3],  state[7],  state[11]
+    return s
 
-# Encrypt a single AES-style block.
-def aes_encrypt_block(state, key_bytes, round_keys):
-    # Apply the initial key whitening.
-    state = xor_bytes(state, key_bytes)
-    # Keep each round state for the UI.
+def _aes_inv_shift_rows(state):
+    s = state[:]
+    s[1],  s[5],  s[9],  s[13] = state[13], state[1],  state[5],  state[9]
+    s[2],  s[6],  s[10], s[14] = state[10], state[14], state[2],  state[6]
+    s[3],  s[7],  s[11], s[15] = state[7],  state[11], state[15], state[3]
+    return s
+
+def _aes_mix_columns(state):
+    g = _GF
+    result = [0] * 16
+    for c in range(4):
+        a = state[c * 4:(c + 1) * 4]
+        result[c*4]   = g[2][a[0]] ^ g[3][a[1]] ^ a[2]       ^ a[3]
+        result[c*4+1] = a[0]       ^ g[2][a[1]] ^ g[3][a[2]] ^ a[3]
+        result[c*4+2] = a[0]       ^ a[1]        ^ g[2][a[2]] ^ g[3][a[3]]
+        result[c*4+3] = g[3][a[0]] ^ a[1]        ^ a[2]       ^ g[2][a[3]]
+    return result
+
+def _aes_inv_mix_columns(state):
+    g = _GF
+    result = [0] * 16
+    for c in range(4):
+        a = state[c * 4:(c + 1) * 4]
+        result[c*4]   = g[14][a[0]] ^ g[11][a[1]] ^ g[13][a[2]] ^ g[9][a[3]]
+        result[c*4+1] = g[9][a[0]]  ^ g[14][a[1]] ^ g[11][a[2]] ^ g[13][a[3]]
+        result[c*4+2] = g[13][a[0]] ^ g[9][a[1]]  ^ g[14][a[2]] ^ g[11][a[3]]
+        result[c*4+3] = g[11][a[0]] ^ g[13][a[1]] ^ g[9][a[2]]  ^ g[14][a[3]]
+    return result
+
+def _aes_add_round_key(state, round_key):
+    return [s ^ k for s, k in zip(state, round_key)]
+
+def _aes_key_expansion(key_bytes):
+    """FIPS 197 key expansion: 16-byte key → 11 × 16-byte round keys."""
+    w = [list(key_bytes[i * 4:(i + 1) * 4]) for i in range(4)]
+    for i in range(4, 44):
+        temp = w[i - 1][:]
+        if i % 4 == 0:
+            temp = temp[1:] + temp[:1]
+            temp = [_AES_SBOX[b] for b in temp]
+            temp[0] ^= _AES_RCON[i // 4 - 1]
+        w.append([w[i - 4][j] ^ temp[j] for j in range(4)])
+    round_keys = []
+    for r in range(11):
+        rk = []
+        for word in w[r * 4:(r + 1) * 4]:
+            rk.extend(word)
+        round_keys.append(rk)
+    return round_keys
+
+def _aes_encrypt_block(state, round_keys):
+    """Encrypt one 16-byte block. Returns (ciphertext_bytes, round_traces)."""
+    state = _aes_add_round_key(state, round_keys[0])
     rounds = []
-    # Run the state through ten rounds.
-    for round_index in range(10):
-        # Apply the substitution layer.
-        state = [sbox(byte) for byte in state]
-        # Apply the row shift layer.
-        state = shift_rows(state)
-        # Skip column mixing on the final round.
-        if round_index < 9:
-            # Apply the column mixing layer.
-            state = mix_columns(state)
-        # Apply the round key.
-        state = xor_bytes(state, round_keys[round_index])
-        # Save the round output as hex.
-        rounds.append({"round": round_index + 1, "stateHex": bytes_to_hex(state)})
-    # Return the final ciphertext and the full trace.
+    for r in range(1, 11):
+        state = _aes_sub_bytes(state)
+        state = _aes_shift_rows(state)
+        if r < 10:
+            state = _aes_mix_columns(state)
+        state = _aes_add_round_key(state, round_keys[r])
+        rounds.append({"round": r, "stateHex": bytes_to_hex(state)})
     return state, rounds
 
-# Decrypt a single AES-style block.
-def aes_decrypt_block(state, key_bytes, round_keys):
-    # Collect the reverse round trace here.
+def _aes_decrypt_block(state, round_keys):
+    """Decrypt one 16-byte block. Returns (plaintext_bytes, round_traces)."""
+    state = _aes_add_round_key(state, round_keys[10])
     rounds = []
-    # Walk the rounds in reverse order.
-    for round_index in range(9, -1, -1):
-        # Remove the round key.
-        state = xor_bytes(state, round_keys[round_index])
-        # Skip the inverse mix on the last forward round.
-        if round_index < 9:
-            # Undo the column mixing layer.
-            state = inv_mix_columns(state)
-        # Undo the row shift layer.
-        state = inv_shift_rows(state)
-        # Undo the substitution layer.
-        state = [inv_sbox(byte) for byte in state]
-        # Save the reverse round state.
-        rounds.append({"round": 10 - round_index, "stateHex": bytes_to_hex(state)})
-    # Remove the initial key whitening.
-    state = xor_bytes(state, key_bytes)
-    # Return the plaintext block and the trace.
+    for r in range(9, -1, -1):
+        state = _aes_inv_shift_rows(state)
+        state = _aes_inv_sub_bytes(state)
+        state = _aes_add_round_key(state, round_keys[r])
+        if r > 0:
+            state = _aes_inv_mix_columns(state)
+        rounds.append({"round": 10 - r, "stateHex": bytes_to_hex(state)})
     return state, rounds
 
-# Encrypt a short message with the AES-style demo cipher.
 def aes_encrypt(text, key, mode="ecb", iv=None):
-    # Convert the key into a 16-byte block.
     key_bytes = text_to_bytes(key or "sixteen-char-key")
-    # Generate the round key list.
-    round_keys = expand_key(key_bytes)
-    # Normalize the requested mode.
+    round_keys = _aes_key_expansion(key_bytes)
     mode = (mode or "ecb").lower()
-    # Split the plaintext into fixed-size blocks.
     blocks = split_text_blocks(text, 16)
-    # Set up the CBC chain state when needed.
     previous_state = hex_iv_bytes(iv, 16) if mode == "cbc" else None
-    # Encrypt each block independently or as a CBC chain.
     ciphertext_parts = []
     block_traces = []
     rounds = []
     for block_index, chunk in enumerate(blocks):
-        # Convert the plaintext block into bytes.
         plain_state = text_to_bytes(chunk)
-        # Apply CBC chaining when requested.
         chain_state = xor_bytes(plain_state, previous_state) if mode == "cbc" else plain_state
-        # Run the block through the AES-style demo cipher.
-        cipher_state, block_rounds = aes_encrypt_block(chain_state, key_bytes, round_keys)
-        # Append the ciphertext for this block.
+        cipher_state, block_rounds = _aes_encrypt_block(chain_state[:], round_keys)
         cipher_hex = bytes_to_hex(cipher_state)
         ciphertext_parts.append(cipher_hex)
-        # Store a block-level trace for the UI.
         block_traces.append({
             "index": block_index + 1,
             "plainHex": bytes_to_hex(plain_state),
@@ -438,13 +442,10 @@ def aes_encrypt(text, key, mode="ecb", iv=None):
             "cipherHex": cipher_hex,
             "rounds": block_rounds,
         })
-        # Keep the first block trace for compatibility with the current view.
         if block_index == 0:
             rounds = block_rounds
-        # Advance the CBC chain when needed.
         if mode == "cbc":
             previous_state = cipher_state[:]
-    # Return the final ciphertext and the full trace.
     return {
         "mode": mode.upper(),
         "ivHex": bytes_to_hex(hex_iv_bytes(iv, 16)) if mode == "cbc" else None,
@@ -454,32 +455,20 @@ def aes_encrypt(text, key, mode="ecb", iv=None):
         "blockCount": len(blocks),
     }
 
-# Decrypt a hex string with the AES-style demo cipher.
 def aes_decrypt(text, key, mode="ecb", iv=None):
-    # Convert the key into a 16-byte block.
     key_bytes = text_to_bytes(key or "sixteen-char-key")
-    # Generate the same round key list.
-    round_keys = expand_key(key_bytes)
-    # Normalize the requested mode.
+    round_keys = _aes_key_expansion(key_bytes)
     mode = (mode or "ecb").lower()
-    # Split the ciphertext into fixed-size blocks.
     blocks = split_hex_blocks(text, 32)
-    # Set up the CBC chain state when needed.
     previous_state = hex_iv_bytes(iv, 16) if mode == "cbc" else None
-    # Decrypt each block independently or as a CBC chain.
     plaintext_parts = []
     block_traces = []
     rounds = []
     for block_index, chunk in enumerate(blocks):
-        # Convert the current ciphertext block into bytes.
         cipher_state = hex_to_bytes(chunk)
-        # Run the reversed round schedule.
-        chain_state, block_rounds = aes_decrypt_block(cipher_state[:], key_bytes, round_keys)
-        # Undo the CBC chaining when requested.
+        chain_state, block_rounds = _aes_decrypt_block(cipher_state[:], round_keys)
         plain_state = xor_bytes(chain_state, previous_state) if mode == "cbc" else chain_state
-        # Convert the bytes back into text.
         plaintext_parts.append(bytes_to_text(plain_state))
-        # Store a block-level trace for the UI.
         block_traces.append({
             "index": block_index + 1,
             "cipherHex": bytes_to_hex(cipher_state),
@@ -487,15 +476,11 @@ def aes_decrypt(text, key, mode="ecb", iv=None):
             "plainHex": bytes_to_hex(plain_state),
             "rounds": block_rounds,
         })
-        # Keep the first block trace for compatibility with the current view.
         if block_index == 0:
             rounds = block_rounds
-        # Advance the CBC chain when needed.
         if mode == "cbc":
             previous_state = cipher_state[:]
-    # Join the block outputs and strip padding from the tail only.
     plaintext = "".join(plaintext_parts).rstrip("\x00")
-    # Return the plaintext and the trace.
     return {
         "mode": mode.upper(),
         "ivHex": bytes_to_hex(hex_iv_bytes(iv, 16)) if mode == "cbc" else None,

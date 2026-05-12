@@ -99,7 +99,6 @@ function InteractivePlayground() {
   const currentStep = totalSteps > 0 ? steps[stepIndex] : null;
   const progress    = totalSteps ? Math.round(((stepIndex + 1) / totalSteps) * 100) : 0;
 
-  /* Auto-play interval */
   useEffect(() => {
     if (!playing || !totalSteps) return undefined;
     const id = window.setInterval(() => {
@@ -111,7 +110,6 @@ function InteractivePlayground() {
     return () => window.clearInterval(id);
   }, [playing, totalSteps, speed]);
 
-  /* Keyboard navigation */
   useEffect(() => {
     function onKey(e) {
       if (!totalSteps) return;
@@ -163,8 +161,6 @@ function InteractivePlayground() {
     }
   }
 
-  /* ── Step display components (MOVED OUTSIDE) ── */
-  
   const algoFamily = algo.split("/")[1] || "";
 
   return (
@@ -178,7 +174,6 @@ function InteractivePlayground() {
       </div>
 
       <div className="pg-layout">
-        {/* ── Left: controls ── */}
         <div className="pg-input-section">
           <div className="pg-algo-select-wrap">
             <label>
@@ -289,7 +284,6 @@ function InteractivePlayground() {
           )}
         </div>
 
-        {/* ── Right: summary ── */}
         {result && (
           <div className="workflow-summary" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", margin: 0 }}>
             <div className="workflow-card workflow-input">
@@ -388,8 +382,6 @@ function InteractivePlayground() {
 }
 
 export default InteractivePlayground;
-
-/* ── Extracted Sub-Components ── */
 
 function SubstitutionDisplay({ result, stepIndex }) {
   if (!result?.steps?.[stepIndex]) return null;

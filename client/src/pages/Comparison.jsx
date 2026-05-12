@@ -19,7 +19,6 @@ import { fetchComparison, runBenchmarks } from "../services/api";
 
 const CHART_COLORS = ["#2563eb", "#0f766e", "#7c3aed", "#ea580c", "#dc2626", "#2dd4bf"];
 
-/* Hard-coded multi-axis scores for radar chart */
 const RADAR_SCORES = {
   "Substitution":        { speed: 10, security: 1,  keyStr: 1,  complexity: 2,  standard: 1  },
   "Double Transposition":{ speed: 9,  security: 2,  keyStr: 3,  complexity: 4,  standard: 1  },
@@ -99,7 +98,6 @@ function Comparison() {
     }));
   }, [benchmarks, metric]);
 
-  /* Build radar data */
   const radarData = useMemo(() => {
     return RADAR_AXES.map(({ key, label }) => {
       const row = { axis: label };
@@ -122,7 +120,6 @@ function Comparison() {
 
   return (
     <div className="comparison-page">
-      {/* ── Hero ── */}
       <section className="card hero-card" style={{ marginBottom: "1rem" }}>
         <div className="comparison-hero-row">
           <div>
@@ -134,7 +131,6 @@ function Comparison() {
           </button>
         </div>
 
-        {/* Algorithm info cards */}
         {algorithms.length > 0 && (
           <div className="algo-cards-grid">
             {algorithms.map((algo) => (
@@ -164,7 +160,6 @@ function Comparison() {
         )}
       </section>
 
-      {/* ── Performance chart + stats ── */}
       <div className="grid-three" style={{ marginBottom: "1rem" }}>
         <section className="card feature-card" style={{ gridColumn: "1 / 3" }}>
           <div className="insight-header">
@@ -231,7 +226,6 @@ function Comparison() {
         </section>
       </div>
 
-      {/* ── Radar chart ── */}
       <section className="card">
         <div className="insight-header">
           <div>
@@ -296,7 +290,6 @@ function Comparison() {
         </div>
       </section>
 
-      {/* ── Spec matrix ── */}
       <section className="card">
         <h3 style={{ marginBottom: "1rem" }}>Cryptographic Specification Matrix</h3>
         <div style={{ overflowX: "auto" }}>

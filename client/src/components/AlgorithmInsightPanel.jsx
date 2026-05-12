@@ -1,9 +1,5 @@
 import { useMemo, useState } from "react";
 
-/* ─────────────────────────────────────────────────────────────
-   Helpers
-   ───────────────────────────────────────────────────────────── */
-
 function detectFamily(route) {
   if (!route) return "general";
   if (route.startsWith("classical/substitution")) return "substitution";
@@ -32,7 +28,6 @@ function hexToBits(hexStr, bitLength = 64) {
   return BigInt(`0x${cleaned}`).toString(2).padStart(bitLength, "0").slice(-bitLength);
 }
 
-/* Byte value → heat-map CSS class for AES hex cells */
 function hexCellClass(hexStr) {
   const v = parseInt(hexStr, 16);
   if (isNaN(v)) return "";
@@ -41,10 +36,6 @@ function hexCellClass(hexStr) {
   if (v < 192) return "hc-2";
   return "hc-3";
 }
-
-/* ─────────────────────────────────────────────────────────────
-   Primitive UI pieces
-   ───────────────────────────────────────────────────────────── */
 
 function ResultBanner({ label, value, mono = true }) {
   const [copied, setCopied] = useState(false);
@@ -75,7 +66,6 @@ function FormulaBox({ children }) {
   return <div className="formula-box">{children}</div>;
 }
 
-/* AES 4×4 hex state matrix — heat-map colored */
 function HexGrid({ hexStr }) {
   const raw   = (hexStr || "").replace(/\s/g, "");
   const bytes = raw.match(/.{1,2}/g) || [];
@@ -98,7 +88,6 @@ function HexGrid({ hexStr }) {
   );
 }
 
-/* Visual bit-block row instead of text */
 function BitBlocks({ bits, limit = 32 }) {
   const s = (bits || "").slice(0, limit);
   return (
@@ -113,7 +102,6 @@ function BitBlocks({ bits, limit = 32 }) {
   );
 }
 
-/* Vertical timeline step */
 function Step({ n, title, tone = "blue", last = false, children }) {
   return (
     <div className={`tl-step tone-${tone}`}>
@@ -128,10 +116,6 @@ function Step({ n, title, tone = "blue", last = false, children }) {
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────────────────────
-   RSA View
-   ───────────────────────────────────────────────────────────── */
 
 function KeyBox({ title, fields, copyStr, accent }) {
   const [copied, setCopied] = useState(false);
@@ -169,7 +153,6 @@ function RSAView({ data, route }) {
 
   return (
     <div>
-      {/* ── Key pair ── */}
       {isKeygen && data?.publicKey && (
         <>
           <SectionLabel>Generated Key Pair</SectionLabel>
@@ -210,7 +193,6 @@ function RSAView({ data, route }) {
         <ResultBanner label="Recovered Plaintext" value={data.plaintext} />
       )}
 
-      {/* ── Attack result ── */}
       {isAttack && (
         <div className={`attack-result-box ${data?.success ? "success" : "fail"}`}>
           <div className="attack-status">
@@ -227,7 +209,6 @@ function RSAView({ data, route }) {
         </div>
       )}
 
-      {/* ── Step-by-step trace ── */}
       <SectionLabel>Step-by-Step Computation</SectionLabel>
       <div className="timeline">
         {steps.length > 0 ? (
@@ -248,7 +229,6 @@ function RSAView({ data, route }) {
         )}
       </div>
 
-      {/* ── Pollard's rho trace ── */}
       {isAttack && data?.trace?.length > 0 && (
         <>
           <SectionLabel>Pollard's Rho Iteration Trace (first 10)</SectionLabel>
@@ -279,10 +259,6 @@ function RSAView({ data, route }) {
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────────────────────
-   AES View — heat-map state matrices
-   ───────────────────────────────────────────────────────────── */
 
 function AESView({ data, route }) {
   const mode      = (data?.mode || "ECB").toUpperCase();
@@ -367,10 +343,6 @@ function AESView({ data, route }) {
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────────────────────
-   DES View — visual bit blocks
-   ───────────────────────────────────────────────────────────── */
 
 function DESView({ data, route }) {
   const mode      = (data?.mode || "ECB").toUpperCase();
@@ -461,17 +433,12 @@ function DESView({ data, route }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ECC ECDH View
-   ───────────────────────────────────────────────────────────── */
-
 function ECCView({ data, payload }) {
   const steps = data?.steps || [];
   const tones = ["blue", "teal", "blue", "teal", "blue"];
 
   return (
     <div>
-      {/* Curve equation bar */}
       <div className="ecc-curve-bar">
         <span className="ecc-param">p = <code>{payload?.p ?? "97"}</code></span>
         <span className="ecc-param">a = <code>{payload?.a ?? "2"}</code></span>
@@ -481,7 +448,6 @@ function ECCView({ data, payload }) {
         </span>
       </div>
 
-      {/* Alice / Bob exchange */}
       <SectionLabel>ECDH Key Exchange</SectionLabel>
       <div className="ecdh-exchange">
         <div className="ecdh-party alice">
@@ -524,7 +490,6 @@ function ECCView({ data, payload }) {
         </div>
       </div>
 
-      {/* Step trace */}
       <SectionLabel>ECDH Computation Steps</SectionLabel>
       <div className="timeline">
         {steps.map((s, i) => (
@@ -543,10 +508,6 @@ function ECCView({ data, payload }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Substitution View
-   ───────────────────────────────────────────────────────────── */
-
 function SubstitutionView({ data, route }) {
   const steps     = data?.steps     || [];
   const isDecrypt = route?.includes("decrypt");
@@ -561,7 +522,6 @@ function SubstitutionView({ data, route }) {
         <ResultBanner label={isDecrypt ? "Decrypted Plaintext" : "Ciphertext"} value={data.text} />
       )}
 
-      {/* ── Full text character flow ── */}
       {!isAttack && steps.length > 0 && (
         <>
           <SectionLabel>Character-by-Character Flow</SectionLabel>
@@ -582,7 +542,6 @@ function SubstitutionView({ data, route }) {
         </>
       )}
 
-      {/* ── Character mapping table ── */}
       {!isAttack && changed.length > 0 && (
         <>
           <SectionLabel>Substitution Table</SectionLabel>
@@ -608,7 +567,6 @@ function SubstitutionView({ data, route }) {
         </>
       )}
 
-      {/* ── Frequency analysis ── */}
       {isAttack && freq && (
         <>
           <SectionLabel>Letter Frequency Analysis</SectionLabel>
@@ -645,10 +603,6 @@ function SubstitutionView({ data, route }) {
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────────────────────
-   Transposition View
-   ───────────────────────────────────────────────────────────── */
 
 function GridTable({ matrix, label, highlightCols = [] }) {
   if (!Array.isArray(matrix) || matrix.length === 0) return null;
@@ -729,10 +683,6 @@ function TranspositionView({ data, route }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Panel metadata
-   ───────────────────────────────────────────────────────────── */
-
 const FAMILY_META = {
   substitution: { label: "Substitution Cipher",   icon: "🔤", cat: "Classical"  },
   transposition: { label: "Double Transposition", icon: "↔",  cat: "Classical"  },
@@ -752,17 +702,12 @@ function dirLabel(route) {
   return "Operation";
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Main export
-   ───────────────────────────────────────────────────────────── */
-
 function AlgorithmInsightPanel({ title, data, route, payload }) {
   const family = useMemo(() => detectFamily(route), [route]);
   const meta   = FAMILY_META[family] || FAMILY_META.general;
 
   return (
     <section className="insight-panel card">
-      {/* Panel header */}
       <div className="ip-header">
         <div className="ip-title-group">
           <div className="ip-icon-wrap">

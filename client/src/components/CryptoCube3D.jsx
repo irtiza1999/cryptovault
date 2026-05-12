@@ -31,7 +31,6 @@ function MiniBlock({ position, hex, isActive, index }) {
         />
         <Edges scale={1.1} threshold={15} color={isActive ? "#7dd3fc" : "#334155"} />
       </Box>
-      {/* Floating text strictly in front */}
       <Text
         position={[0, 0, 0.6]} 
         fontSize={0.45}

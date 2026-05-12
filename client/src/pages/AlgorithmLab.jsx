@@ -54,7 +54,6 @@ export default function AlgorithmLab() {
   const [bitSize,    setBitSize]    = useState("40");
   const [publicKey,  setPublicKey]  = useState("65537,9173503");
   const [privateKey, setPrivateKey] = useState("4922825,9173503");
-  // ECC curve parameters — fully editable
   const [eccP,       setEccP]       = useState("97");
   const [eccA,       setEccA]       = useState("2");
   const [eccGx,      setEccGx]      = useState("3");
@@ -126,8 +125,6 @@ export default function AlgorithmLab() {
     }
   }
 
-  // Save to vault removed (authentication removed)
-
   function applyGeneratedKeys() {
     if (!output?.publicKey || !output?.privateKey) return;
     const { e, n } = output.publicKey;
@@ -149,7 +146,6 @@ export default function AlgorithmLab() {
 
   return (
     <div className="card lab-card">
-      {/* ── Header ─────────────────────────────────── */}
       <div className="lab-header">
         <div>
           <h2 className="lab-title">Algorithm Lab</h2>
@@ -158,7 +154,6 @@ export default function AlgorithmLab() {
         <span className={`dir-badge ${badge.cls}`}>{badge.label}</span>
       </div>
 
-      {/* ── Algorithm Selector ─────────────────────── */}
       <div className="algo-selector-wrap">
         <label className="algo-selector-label">
           <span className="field-label">Algorithm</span>
@@ -175,7 +170,6 @@ export default function AlgorithmLab() {
         {hint && <p className="algo-hint">ℹ {hint}</p>}
       </div>
 
-      {/* ── Input Fields ───────────────────────────── */}
       <div className="form-grid lab-form">
 
         {currentAlgo?.fields.includes("text") && (
@@ -311,12 +305,10 @@ export default function AlgorithmLab() {
         )}
       </div>
 
-      {/* ── Actions ────────────────────────────────── */}
       <div className="lab-actions">
         <button onClick={run} disabled={running} className="run-btn">
           {running ? "⏳ Computing…" : "▶  Run Algorithm"}
         </button>
-        {/* Save to Vault removed */}
         {route.includes("rsa/keygen") && output?.publicKey && (
           <button onClick={applyGeneratedKeys} className="ghost-button use-keys-btn">
             ⚡ Use These Keys
