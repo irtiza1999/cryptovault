@@ -8,13 +8,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { fetchBenchmarkHistory, healthCheck, runAlgorithm, runBenchmarks } from "../services/api";
+import { fetchBenchmarkHistory, healthCheck, runBenchmarks } from "../services/api";
 import CryptoCube3D from "../components/CryptoCube3D";
 
 function Dashboard() {
   const [status, setStatus] = useState("Checking API...");
-  const [previewText, setPreviewText] = useState("interactive dashboard preview");
-  const [previewOutput, setPreviewOutput] = useState("");
   const [size, setSize] = useState(100);
   const [benchRows, setBenchRows] = useState([]);
   const [loadingBench, setLoadingBench] = useState(false);
@@ -47,20 +45,6 @@ function Dashboard() {
       .catch(() => setBenchRows([]));
   }, []);
 
-  async function runLivePreview() {
-    setError("");
-    try {
-      const res = await runAlgorithm("classical/substitution/encrypt", {
-        text: previewText,
-        key: "phqgiumeaylnofdxkrcvstzwbj",
-      });
-      setPreviewOutput(res.data.text || "");
-    } catch (err) {
-      setError(err.response?.data?.message || err.message);
-      setPreviewOutput("");
-    }
-  }
-
   async function runDashboardBenchmark() {
     setLoadingBench(true);
     setError("");
@@ -88,19 +72,7 @@ function Dashboard() {
         </div>
       </section>
 
-      <section className="grid-three">
-        <article className="card feature-card">
-          <h3>Live Cipher Preview</h3>
-          <p>Type text, run substitution instantly, and see ciphertext directly on the dashboard.</p>
-          <label>
-            Preview text
-            <input value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
-          </label>
-          <div className="lab-actions">
-            <button onClick={runLivePreview}>Run Preview</button>
-          </div>
-          {previewOutput ? <p className="dashboard-output">{previewOutput}</p> : null}
-        </article>
+      <section className="grid-three" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
         <article className="card feature-card">
           <h3>Interactive Benchmark Trigger</h3>
           <p>Run a quick benchmark from the dashboard and update the live chart.</p>

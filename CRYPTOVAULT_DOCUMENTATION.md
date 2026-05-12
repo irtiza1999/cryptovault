@@ -172,7 +172,7 @@ Every algorithm, utility, and frontend component mapped to its exact file.
 | File | Page | What It Does |
 |------|------|-------------|
 | `client/src/pages/AlgorithmLab.jsx` | Algorithm Lab | Primary interactive cipher playground — select algorithm, enter inputs, view results |
-| `client/src/pages/Dashboard.jsx` | Dashboard | Live cipher preview, benchmark trigger, runtime bar chart, API health status |
+| `client/src/pages/Dashboard.jsx` | Dashboard | Benchmark trigger, runtime bar chart, API health status |
 | `client/src/pages/InteractivePlayground.jsx` | Interactive Playground | Step-by-step trace viewer with auto-play, keyboard nav, 3D visuals, AI tutor |
 | `client/src/pages/Comparison.jsx` | Comparison | Side-by-side benchmark charts, radar chart, algorithm spec table |
 | `client/src/pages/SecurityAnalysis.jsx` | Security Analysis | Strengths / weaknesses cards for each algorithm |
@@ -1822,7 +1822,6 @@ The primary interactive page. Users select an algorithm, fill in parameters, and
 
 #### Dashboard.jsx — Status & Benchmarks
 
-- Live cipher preview (substitution encrypt shown in real time)
 - Benchmark trigger button → runs all algorithms at multiple input sizes
 - Bar chart of average runtimes (Recharts)
 - API health indicator

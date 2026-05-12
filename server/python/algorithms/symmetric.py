@@ -1,5 +1,13 @@
 from algorithms.common import bits_to_string, bytes_to_hex, hex_to_bytes, mod, mod_inv, string_to_bits, text_to_bytes
 
+"""Symmetric encryption implementations and helpers.
+
+This module provides reference implementations of DES and AES block
+algorithms along with small helper utilities for bit/byte conversion
+and block splitting. Functions return structured traces useful for
+educational visualization of internal rounds and state transitions.
+"""
+
 _DES_PC1 = [
     57,49,41,33,25,17, 9,
      1,58,50,42,34,26,18,
@@ -110,21 +118,37 @@ def _rotate_left_bits(bits, n):
     return bits[n:] + bits[:n]
 
 def _xor_lists(a, b):
+    """Bitwise XOR two equal-length lists of bits, returning a new list."""
     return [x ^ y for x, y in zip(a, b)]
 
 def _list_to_str(bits):
+    """Convert a list of bits (0/1 integers) into a string of '0'/'1'."""
     return "".join(str(b) for b in bits)
 
 def _str_to_list(s):
+    """Convert a string of '0'/'1' characters into a list of ints."""
     return [int(c) for c in s]
 
 def _sbox_lookup(six_bits, box_index):
+    """Lookup 4-bit output from the DES S-box.
+
+    DES S-box inputs are 6 bits where the outer two bits form the row
+    and the middle four bits form the column. This returns the 4-bit
+    output as a list of bits (MSB first).
+    """
     row = (six_bits[0] << 1) | six_bits[5]
     col = (six_bits[1] << 3) | (six_bits[2] << 2) | (six_bits[3] << 1) | six_bits[4]
     val = _DES_SBOXES[box_index][row * 16 + col]
     return [(val >> (3 - i)) & 1 for i in range(4)]
 
 def _des_round_function(right_bits, round_key_bits):
+    """DES f-function: expansion, key mixing, S-boxes, and P-permutation.
+
+    - Expand 32-bit `right_bits` to 48 bits using the E table.
+    - XOR with the 48-bit round key.
+    - Apply 8 S-boxes (6→4 bits each) concatenating the results.
+    - Apply the P permutation to the 32-bit S-box output and return it.
+    """
     expanded = _permute(right_bits, _DES_E)
     xored = _xor_lists(expanded, round_key_bits)
     sbox_out = []
@@ -133,6 +157,12 @@ def _des_round_function(right_bits, round_key_bits):
     return _permute(sbox_out, _DES_P)
 
 def _des_key_schedule(key_bits_str):
+    """Produce the 16 48-bit round keys for DES from a key bit string.
+
+    Input can be any string of '0'/'1' characters; it is padded/truncated
+    to 64 bits, permuted with PC-1, then C/D halves are rotated and
+    compressed through PC-2 to make 16 round keys.
+    """
     key_bits = _str_to_list((key_bits_str + "0" * 64)[:64])
     cd = _permute(key_bits, _DES_PC1)
     c, d = cd[:28], cd[28:]
@@ -144,6 +174,14 @@ def _des_key_schedule(key_bits_str):
     return round_keys
 
 def _des_process_block(block_bits_str, round_keys):
+    """Encrypt/decrypt a single 64-bit DES block using provided round keys.
+
+    The same routine is used for encryption and decryption depending on
+    whether `round_keys` is in forward or reversed order. It applies the
+    initial permutation (IP), performs 16 Feistel rounds, swaps halves,
+    and applies the final permutation (FP). Returns the 64-bit result
+    as a '0'/'1' string plus a trace of round states.
+    """
     bits = _str_to_list((block_bits_str + "0" * 64)[:64])
     bits = _permute(bits, _DES_IP)
     left, right = bits[:32], bits[32:]
@@ -163,12 +201,19 @@ def _des_process_block(block_bits_str, round_keys):
     return _list_to_str(final), rounds
 
 def xor_bits(left, right):
+    """XOR two bit-strings (e.g. '0101') producing another bit-string."""
     return "".join("0" if a == b else "1" for a, b in zip(left, right))
 
 def xor_bytes(left, right):
+    """XOR two byte lists returning a new list of bytes."""
     return [l ^ r for l, r in zip(left, right)]
 
 def split_text_blocks(text, block_size):
+    """Split `text` into fixed-size blocks, padding with nulls as needed.
+
+    Always returns at least one block. This is a simple padding approach
+    for educational purposes (not a secure padding scheme for production).
+    """
     raw = text or ""
     if not raw:
         raw = "\x00" * block_size
@@ -179,6 +224,7 @@ def split_text_blocks(text, block_size):
     return blocks
 
 def split_hex_blocks(raw_hex, block_hex_len):
+    """Split a hex string into fixed-size hex blocks, padding with '0'."""
     cleaned = (raw_hex or "").replace("0x", "").strip().lower()
     if not cleaned:
         cleaned = "0" * block_hex_len
@@ -189,22 +235,36 @@ def split_hex_blocks(raw_hex, block_hex_len):
     return blocks
 
 def bits_to_block_hex(bits, byte_width):
+    """Convert a bit-string to a zero-padded hex string for a block."""
     return hex(int(bits or "0", 2))[2:].zfill(byte_width * 2)
 
 def bytes_to_text(data):
+    """Convert a list of byte values into a text string, trimming nulls."""
     return "".join(chr(byte) for byte in data).rstrip("\x00")
 
 def normalize_hex_iv(raw_hex, block_hex_len):
+    """Normalize an IV hex string to the fixed hex length for a block."""
     cleaned = (raw_hex or "").replace("0x", "").strip().lower()
     if not cleaned:
         cleaned = "0" * block_hex_len
     return (cleaned + "0" * block_hex_len)[:block_hex_len]
 
 def hex_iv_bytes(raw_hex, block_bytes):
+    """Return IV as a list of bytes for AES/DES CBC chaining.
+
+    The input may be any hex-ish string; it's normalized and converted to
+    bytes of length `block_bytes`.
+    """
     cleaned = normalize_hex_iv(raw_hex, block_bytes * 2)
     return hex_to_bytes(cleaned)[:block_bytes]
 
 def des_encrypt(text, key, mode="ecb", iv=None):
+    """Encrypt `text` using DES with `key`.
+
+    Supports modes: 'ecb' and 'cbc'. For CBC, `iv` is expected as a
+    hex string; for ECB, `iv` is ignored. Returned value contains the
+    ciphertext hex and structured trace information for blocks/rounds.
+    """
     raw_key = (key or "secret!!")[:8].ljust(8, "\x00")
     key_bits = string_to_bits(raw_key)
     round_keys = _des_key_schedule(key_bits)
@@ -246,6 +306,12 @@ def des_encrypt(text, key, mode="ecb", iv=None):
     }
 
 def des_decrypt(hex_text, key, mode="ecb", iv=None):
+    """Decrypt a DES ciphertext (hex) returning plaintext and trace info.
+
+    Mirrors `des_encrypt` and accepts 'ecb' or 'cbc'. For CBC decryption
+    the round keys are supplied in reverse so the same processing routine
+    can be used in `_des_process_block`.
+    """
     raw_key = (key or "secret!!")[:8].ljust(8, "\x00")
     key_bits = string_to_bits(raw_key)
     round_keys = list(reversed(_des_key_schedule(key_bits)))
@@ -286,6 +352,7 @@ def des_decrypt(hex_text, key, mode="ecb", iv=None):
         "blockCount": len(blocks),
     }
 
+# AES S-box (substitution box) and related AES constants.
 _AES_SBOX = [
     0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
     0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
@@ -312,6 +379,11 @@ for _i, _v in enumerate(_AES_SBOX):
 _AES_RCON = [0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36]
 
 def _build_gf_tables():
+    """Build multiplication tables in GF(2^8) for AES MixColumns.
+
+    Precomputes tables for the constants used in the MixColumns step to
+    make column multiplication fast and readable.
+    """
     out = {}
     for factor in (2, 3, 9, 11, 13, 14):
         table = []
@@ -332,12 +404,15 @@ def _build_gf_tables():
 _GF = _build_gf_tables()
 
 def _aes_sub_bytes(state):
+    """Apply AES S-box substitution to every byte in the state."""
     return [_AES_SBOX[b] for b in state]
 
 def _aes_inv_sub_bytes(state):
+    """Apply inverse AES S-box substitution to every byte in the state."""
     return [_AES_INV_SBOX[b] for b in state]
 
 def _aes_shift_rows(state):
+    """Perform AES ShiftRows: cyclically rotate rows of the 4x4 state."""
     s = state[:]
     s[1],  s[5],  s[9],  s[13] = state[5],  state[9],  state[13], state[1]
     s[2],  s[6],  s[10], s[14] = state[10], state[14], state[2],  state[6]
@@ -345,6 +420,7 @@ def _aes_shift_rows(state):
     return s
 
 def _aes_inv_shift_rows(state):
+    """Inverse of ShiftRows used during AES decryption."""
     s = state[:]
     s[1],  s[5],  s[9],  s[13] = state[13], state[1],  state[5],  state[9]
     s[2],  s[6],  s[10], s[14] = state[10], state[14], state[2],  state[6]
@@ -352,6 +428,7 @@ def _aes_inv_shift_rows(state):
     return s
 
 def _aes_mix_columns(state):
+    """MixColumns step: mix each 4-byte column using GF(2^8) tables."""
     g = _GF
     result = [0] * 16
     for c in range(4):
@@ -363,6 +440,7 @@ def _aes_mix_columns(state):
     return result
 
 def _aes_inv_mix_columns(state):
+    """Inverse MixColumns used during AES decryption."""
     g = _GF
     result = [0] * 16
     for c in range(4):
@@ -374,6 +452,7 @@ def _aes_inv_mix_columns(state):
     return result
 
 def _aes_add_round_key(state, round_key):
+    """XOR the state with a round key (AddRoundKey step)."""
     return [s ^ k for s, k in zip(state, round_key)]
 
 def _aes_key_expansion(key_bytes):
@@ -421,6 +500,10 @@ def _aes_decrypt_block(state, round_keys):
     return state, rounds
 
 def aes_encrypt(text, key, mode="ecb", iv=None):
+    """Encrypt `text` using AES-128 in ECB or CBC mode.
+
+    Returns structured trace data similar to the DES functions.
+    """
     key_bytes = text_to_bytes(key or "sixteen-char-key")
     round_keys = _aes_key_expansion(key_bytes)
     mode = (mode or "ecb").lower()
@@ -456,6 +539,7 @@ def aes_encrypt(text, key, mode="ecb", iv=None):
     }
 
 def aes_decrypt(text, key, mode="ecb", iv=None):
+    """Decrypt AES-128 ciphertext (hex) returning plaintext and traces."""
     key_bytes = text_to_bytes(key or "sixteen-char-key")
     round_keys = _aes_key_expansion(key_bytes)
     mode = (mode or "ecb").lower()
